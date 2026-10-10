@@ -10,12 +10,15 @@
 // - flow: the noise is the direction particles move in. Particles start at random points
 //   and run downstream until they meet another line, where they join it, so streams unite
 //   into larger flows.
+// - network: not particles but a network. Dots on a jittered grid are linked to their natural
+//   neighbours, and some dots are hubs whose spokes reach further, like stars. Dots with
+//   more links are drawn larger.
 //
 // Growth runs step by step, so the preview can animate it.
 
 import { createNoise2D } from 'simplex-noise'
 
-export type PatternStyle = 'contours' | 'flow'
+export type PatternStyle = 'contours' | 'flow' | 'network'
 
 export interface PatternInput {
   style: PatternStyle
@@ -36,6 +39,9 @@ const spacing = 1 // distance between neighbouring lines
 const minDistance = 0.6 // a line stops when it gets closer than this to another line
 const minPoints = 12 // shorter lines are dropped, they only add clutter
 const seedSpacing = { contours: 3.5, flow: 1.5 } // grid cell size for seeds
+const linkGap = 0.3 // between a link's end and its dot
+const hubShare = 0.12 // share of dots that become star-like hubs
+const hubReach = 2.5 // how far hub spokes reach, in grid cells
 const ownGap = Math.ceil((3 * minDistance) / step) // a line ignores its own points this close along it
 
 function random(seed: number) {
@@ -138,6 +144,7 @@ export type Pattern = ReturnType<typeof createPattern>
 export function createPattern(input: PatternInput) {
   let finished = '' // path data of completed lines
   let current: { backward: LinePoint[]; forward: LinePoint[] } | undefined // line growing right now
+  let partial = '' // network link growing right now
   let done = false
 
   const currentPoints = () => current ? [...current.backward].reverse().concat(current.forward) : []
@@ -149,6 +156,10 @@ export function createPattern(input: PatternInput) {
     const resolution = Math.max(0.1, Math.sqrt((input.width * input.height) / 2e6))
     const free = freeMask(input, resolution)
     const rand = random(input.seed)
+    if (input.style === 'network') {
+      yield* growNetwork(free, rand)
+      return
+    }
     const grid = new LineGrid()
 
     // two octaves of noise, features scale with the letters
@@ -236,7 +247,7 @@ export function createPattern(input: PatternInput) {
     // seeds sit on a grid with random offsets, covering the whole region, text included, so
     // they are spread evenly and their number scales with the label;
     // the ones on text or too close to it are dropped before anything grows
-    const cell = seedSpacing[input.style]
+    const cell = seedSpacing[contours ? 'contours' : 'flow']
     const seeds: [number, number][] = []
     for (let y = y1; y < y2; y += cell) {
       for (let x = x1; x < x2; x += cell) seeds.push([x + rand() * cell, y + rand() * cell])
@@ -258,6 +269,134 @@ export function createPattern(input: PatternInput) {
     }
   }
 
+  /** Gabriel graph of jittered grid dots plus star-like hubs, spreading out from a random dot */
+  function* growNetwork(free: (x: number, y: number) => boolean, rand: () => number) {
+    const { x1, y1, x2, y2 } = input.region
+    const cell = 2.5 + 0.4 * input.clearance // network clearance is a quarter letter height
+    const maxRadius = 1.2
+
+    // a dot needs room for its largest size
+    const roomy = (x: number, y: number) =>
+      free(x, y) && free(x - maxRadius, y) && free(x + maxRadius, y) && free(x, y - maxRadius) && free(x, y + maxRadius)
+    /** anchors sit on the region edge (the frame): links end there, no dot is drawn */
+    const nodes: { x: number; y: number; links: number[]; radius: number; anchor: boolean }[] = []
+    for (let y = y1; y < y2; y += cell) {
+      for (let x = x1; x < x2; x += cell) {
+        const node = { x: x + (0.15 + 0.7 * rand()) * cell, y: y + (0.15 + 0.7 * rand()) * cell, links: [], radius: 0, anchor: false }
+        if (roomy(node.x, node.y)) nodes.push(node)
+      }
+    }
+    const inward = 0.3 // anchors are checked slightly inside the edge, where the mask is reliable
+    const along = (from: number, to: number) => {
+      const positions: number[] = []
+      for (let t = from + cell / 2; t < to - cell / 4; t += cell) positions.push(t + (rand() - 0.5) * 0.6 * cell)
+      return positions
+    }
+    for (const x of along(x1, x2)) {
+      if (free(x, y1 + inward)) nodes.push({ x, y: y1, links: [], radius: 0, anchor: true })
+      if (free(x, y2 - inward)) nodes.push({ x, y: y2, links: [], radius: 0, anchor: true })
+    }
+    for (const y of along(y1, y2)) {
+      if (free(x1 + inward, y)) nodes.push({ x: x1, y, links: [], radius: 0, anchor: true })
+      if (free(x2 - inward, y)) nodes.push({ x: x2, y, links: [], radius: 0, anchor: true })
+    }
+
+    const distance = (a: number, b: number) => Math.hypot(nodes[a]!.x - nodes[b]!.x, nodes[a]!.y - nodes[b]!.y)
+    const clear = (a: number, b: number) => {
+      const samples = Math.ceil(distance(a, b) / 0.3)
+      for (let i = 1; i < samples; i++) {
+        const t = i / samples
+        if (!free(nodes[a]!.x + (nodes[b]!.x - nodes[a]!.x) * t, nodes[a]!.y + (nodes[b]!.y - nodes[a]!.y) * t)) return false
+      }
+      return true
+    }
+    const near = nodes.map((_, a) => nodes.map((_, b) => b).filter((b) => b !== a && distance(a, b) < hubReach * cell))
+    const link = (a: number, b: number) => {
+      if (nodes[a]!.anchor && nodes[b]!.anchor) return
+      if (nodes[a]!.links.includes(b) || !clear(a, b)) return
+      nodes[a]!.links.push(b)
+      nodes[b]!.links.push(a)
+    }
+    // a and b are linked unless another dot lies in the circle with diameter ab
+    near.forEach((neighbours, a) => {
+      for (const b of neighbours) {
+        if (b < a) continue
+        const ab = distance(a, b) ** 2
+        if (!neighbours.some((c) => c !== b && distance(a, c) ** 2 + distance(b, c) ** 2 < ab)) link(a, b)
+      }
+    })
+    // hubs reach every dot around them whose spoke doesn't run through another dot
+    const passes = (a: number, b: number, c: number) => {
+      const ab = distance(a, b)
+      const t = ((nodes[c]!.x - nodes[a]!.x) * (nodes[b]!.x - nodes[a]!.x) + (nodes[c]!.y - nodes[a]!.y) * (nodes[b]!.y - nodes[a]!.y)) / ab ** 2
+      if (t <= 0 || t >= 1) return false
+      const x = nodes[a]!.x + (nodes[b]!.x - nodes[a]!.x) * t
+      const y = nodes[a]!.y + (nodes[b]!.y - nodes[a]!.y) * t
+      return Math.hypot(nodes[c]!.x - x, nodes[c]!.y - y) < maxRadius + linkGap
+    }
+    nodes.forEach((_, a) => {
+      if (rand() >= hubShare) return
+      for (const b of near[a]!) {
+        if (!near[a]!.some((c) => c !== b && passes(a, b, c))) link(a, b)
+      }
+    })
+    for (const node of nodes) node.radius = node.anchor ? 0 : Math.min(maxRadius, 0.15 + 0.1 * node.links.length)
+
+    const dot = (node: (typeof nodes)[number]) => {
+      if (node.anchor) return ''
+      const { x, y, radius: r } = node
+      return `M${(x - r).toFixed(2)} ${y.toFixed(2)}A${r.toFixed(2)} ${r.toFixed(2)} 0 1 0 ${(x + r).toFixed(2)} ${y.toFixed(2)}` +
+        `A${r.toFixed(2)} ${r.toFixed(2)} 0 1 0 ${(x - r).toFixed(2)} ${y.toFixed(2)}`
+    }
+
+    // spread out breadth first, starting each separate part of the network at a random dot
+    const visited = new Set<number>()
+    const linked = new Set<string>()
+    const order = nodes.map((_, index) => index)
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1))
+      ;[order[i], order[j]] = [order[j]!, order[i]!]
+    }
+    for (const start of order) {
+      if (visited.has(start) || nodes[start]!.links.length === 0) continue
+      visited.add(start)
+      finished += dot(nodes[start]!)
+      const queue = [start]
+      while (queue.length) {
+        const a = queue.shift()!
+        for (const b of nodes[a]!.links) {
+          const key = a < b ? `${a}-${b}` : `${b}-${a}`
+          if (linked.has(key)) continue
+          linked.add(key)
+
+          // the link runs from dot edge to dot edge
+          const from = nodes[a]!
+          const to = nodes[b]!
+          const length = distance(a, b)
+          const dx = (to.x - from.x) / length
+          const dy = (to.y - from.y) / length
+          const begin = from.anchor ? 0 : from.radius + linkGap
+          const end = length - (to.anchor ? 0 : to.radius + linkGap)
+          const segment = (until: number) =>
+            `M${(from.x + dx * begin).toFixed(2)} ${(from.y + dy * begin).toFixed(2)}` +
+            `L${(from.x + dx * until).toFixed(2)} ${(from.y + dy * until).toFixed(2)}`
+          for (let along = begin + step; along < end; along += step) {
+            partial = segment(along)
+            yield
+          }
+          partial = ''
+          if (end > begin) finished += segment(end)
+
+          if (!visited.has(b)) {
+            visited.add(b)
+            finished += dot(to)
+            queue.push(b)
+          }
+        }
+      }
+    }
+  }
+
   const growth = grow()
   return {
     /** grows by up to `steps` particle steps; returns true once the pattern is complete */
@@ -268,7 +407,7 @@ export function createPattern(input: PatternInput) {
     /** SVG path data of everything grown so far */
     path() {
       const points = currentPoints()
-      return points.length >= 2 ? finished + linePath(points) : finished
+      return finished + partial + (points.length >= 2 ? linePath(points) : '')
     },
   }
 }

@@ -3,17 +3,52 @@ import { computed, reactive, ref, watch } from 'vue'
 import { fileName, layoutLabel, loadFonts, toSvg, type LabelOptions } from './label'
 import { createPattern, type Pattern } from './pattern'
 
-const options = reactive<LabelOptions>({
+const defaults: LabelOptions = {
   text: 'Mehl\nWeizen 700',
   textSize: 10,
-  holes: 'none',
+  padding: 1,
+  holes: 'sides',
   holeAlign: 'middle',
-  holeDiameter: 3,
-  frame: true,
+  holeDiameter: 4,
+  frame: false,
   innerLine: true,
-  pattern: 'flow',
+  pattern: 'network',
   patternSeed: 1,
+}
+
+const patternStyles = [
+  { value: 'none', label: 'None' },
+  { value: 'contours', label: 'Contours' },
+  { value: 'flow', label: 'Flow' },
+  { value: 'network', label: 'Network' },
+] as const
+
+// settings survive page reloads; storage may be unavailable (private mode, blocked site data)
+const storageKey = 'label-options'
+function storedOptions(): Partial<LabelOptions> {
+  try {
+    const stored = JSON.parse(localStorage.getItem(storageKey) ?? '{}')
+    // drop patterns that were renamed or removed since
+    if (!patternStyles.some((style) => style.value === stored.pattern)) delete stored.pattern
+    return stored
+  } catch {
+    return {}
+  }
+}
+
+const options = reactive<LabelOptions>({ ...defaults, ...storedOptions() })
+watch(options, () => {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(options))
+  } catch {
+    // not saved, the page still works
+  }
 })
+
+/** everything back to the defaults, except the text */
+function resetOptions() {
+  Object.assign(options, { ...defaults, text: options.text })
+}
 
 function reshufflePattern() {
   options.patternSeed = Math.floor(Math.random() * 2 ** 31)
@@ -26,7 +61,7 @@ const textSizeSlider = computed({
   get: () => Math.log(options.textSize / minTextSize) / Math.log(maxTextSize / minTextSize),
   set: (position: number) => {
     const size = minTextSize * (maxTextSize / minTextSize) ** position
-    options.textSize = size < 10 ? Math.round(size * 10) / 10 : Math.round(size * 2) / 2
+    options.textSize = Math.round(size)
   },
 })
 
@@ -62,12 +97,6 @@ watch(label, (current) => {
   }
   animate()
 }, { immediate: true })
-
-const patternStyles = [
-  { value: 'none', label: 'None' },
-  { value: 'contours', label: 'Contours' },
-  { value: 'flow', label: 'Flow' },
-] as const
 
 const holeModes = [
   { value: 'none', label: 'None' },
@@ -109,7 +138,10 @@ async function share() {
 
 <template>
   <main>
-    <h1>Commons Hub Labels</h1>
+    <header>
+      <h1>Commons Hub Labels</h1>
+      <button type="button" class="secondary" @click="resetOptions">Reset to defaults</button>
+    </header>
 
     <section class="preview">
       <svg
@@ -122,6 +154,8 @@ async function share() {
           <path class="pattern" :d="patternPath" />
           <path class="engraving" :d="label.framePath" fill-rule="evenodd" />
           <path class="engraving" :d="label.textPath" />
+          <!-- holes are cut through everything, so they go on top -->
+          <circle v-for="(hole, index) in label.holes" :key="index" class="hole" :cx="hole.x" :cy="hole.y" :r="hole.r" />
         </g>
         <g class="coin" :transform="`translate(${previewBox.coinX} ${previewBox.height / 2})`">
           <title>1 € coin for scale</title>
@@ -142,6 +176,11 @@ async function share() {
       <label>
         Letter height: {{ options.textSize }} mm
         <input v-model.number="textSizeSlider" type="range" min="0" max="1" step="0.001" />
+      </label>
+
+      <label>
+        Padding: {{ options.padding.toFixed(1) }} × letter height
+        <input v-model.number="options.padding" type="range" min="0.2" max="3" step="0.1" />
       </label>
 
       <label class="choice">
@@ -183,7 +222,7 @@ async function share() {
 
       <label v-if="options.holes !== 'none'">
         Hole diameter: {{ options.holeDiameter }} mm
-        <input v-model.number="options.holeDiameter" type="range" min="1" max="5" step="0.5" />
+        <input v-model.number="options.holeDiameter" type="range" min="2" max="10" step="0.5" />
       </label>
 
       <div class="actions">

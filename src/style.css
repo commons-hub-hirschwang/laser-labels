@@ -47,9 +47,37 @@ main {
   grid-template-columns: minmax(0, 1fr);
   gap: 1.5rem;
 
+  & header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+  }
+
   & h1 {
     margin: 0;
     font-size: 1.5rem;
+  }
+}
+
+button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 0.25rem;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.5;
+  }
+
+  &.secondary {
+    padding: 0.25rem 0.75rem;
+    background: none;
+    border: 1px solid var(--accent);
+    color: var(--accent);
   }
 }
 
@@ -72,6 +100,10 @@ main {
     fill: var(--wood);
     stroke: var(--wood-edge);
     stroke-width: 0.3;
+  }
+
+  & .hole {
+    fill: var(--surface);
   }
 
   & .engraving {
@@ -158,26 +190,6 @@ form {
     gap: 0.5rem;
   }
 
-  & button {
-    font: inherit;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 0.25rem;
-    background: var(--accent);
-    color: #fff;
-    cursor: pointer;
-
-    &:disabled {
-      opacity: 0.5;
-    }
-
-    &.secondary {
-      padding: 0.25rem 0.75rem;
-      background: none;
-      border: 1px solid var(--accent);
-      color: var(--accent);
-    }
-  }
 }
 
 aside {

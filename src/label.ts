@@ -12,6 +12,8 @@ export interface LabelOptions {
   text: string
   /** cap height of the letters */
   textSize: number
+  /** space around the text, relative to the letter height */
+  padding: number
   holes: HoleMode
   /** only used for holes === 'sides' */
   holeAlign: HoleAlign
@@ -36,13 +38,11 @@ export interface Label {
   holes: { x: number; y: number; r: number }[]
 }
 
-const cornerRadius = 1.5 // without frame; with frame the corners are concentric with the frame's
+const cornerRadius = 1.5 // without frame; with frame the corners are concentric with the frame's outer corners
 const edgeMargin = 1.5 // between label edge, frame, holes and text
 const frameWidth = 2
-// distance of the frame's centre line from the label edge, fixed so holes don't change it;
-// holes sit on that line, which leaves 3 mm of wood around the largest (5 mm) hole
+// distance of the frame's centre line from the label edge, fixed so holes don't change it
 const frameInset = 5.5
-const frameRadius = 1.5 // of the frame's centre line
 const innerLineWidth = 0.5
 const innerLineGap = 1.5 // wood between frame and inner line
 const lineHeightFactor = 1.2
@@ -114,6 +114,22 @@ function circle(x: number, y: number, r: number) {
 
 const round = (value: number) => Math.round(value * 1000) / 1000
 
+/**
+ * Replaces path.toPathData: its rounding writes NaN for values within float noise of an
+ * integer (it parses strings like "3.5e-15e+3"), which breaks the whole path.
+ */
+function pathData(path: Path) {
+  return path.commands.map((command) => {
+    switch (command.type) {
+      case 'M':
+      case 'L': return `${command.type}${round(command.x)} ${round(command.y)}`
+      case 'Q': return `Q${round(command.x1)} ${round(command.y1)} ${round(command.x)} ${round(command.y)}`
+      case 'C': return `C${round(command.x1)} ${round(command.y1)} ${round(command.x2)} ${round(command.y2)} ${round(command.x)} ${round(command.y)}`
+      case 'Z': return 'Z'
+    }
+  }).join('')
+}
+
 export function layoutLabel(options: LabelOptions): Label {
   const font = fonts[0]!
   const capHeight = font.tables.os2!.sCapHeight / font.unitsPerEm
@@ -141,19 +157,21 @@ export function layoutLabel(options: LabelOptions): Label {
     y2: Math.max(ink?.y2 ?? 0, lastBaseline),
   }
 
-  // the pattern keeps half a letter height away from the text, so it needs room
-  const padding = options.pattern !== 'none' ? options.textSize * 1.4 : Math.max(1.5, options.textSize * 0.35)
+  // the pattern keeps half a letter height away from the text, so it only shows above 0.5
+  const padding = Math.max(1.5, options.textSize * options.padding)
   const r = options.holeDiameter / 2
   const holeEdge = Math.max(3, options.holeDiameter) // wood between hole and label edge
-  // hole centre distance from edge: on the frame's centre line if there is a frame
-  const c = options.frame ? frameInset : holeEdge + r
+  const frameHalf = frameWidth / 2
+  const frameOuter = frameInset - frameHalf // outer edge of the frame
+  const frameInner = frameInset + frameHalf // inner edge of the frame
+  // hole centre distance from edge: holes touch the frame's outer edge from inside
+  const c = options.frame ? frameOuter + r : holeEdge + r
   const hasHoles = options.holes !== 'none'
 
   // distance from each label edge to the padded text area
   const inset = { left: edgeMargin, right: edgeMargin, top: edgeMargin, bottom: edgeMargin }
-  const frameHalf = frameWidth / 2
   if (options.frame) {
-    const value = frameInset + Math.max(frameHalf, hasHoles ? r : 0) + edgeMargin
+    const value = Math.max(frameInner, hasHoles ? frameOuter + 2 * r : 0) + edgeMargin
     inset.left = inset.right = inset.top = inset.bottom = value
   } else {
     const holeZone = c + r + edgeMargin
@@ -175,23 +193,19 @@ export function layoutLabel(options: LabelOptions): Label {
   let framePath = ''
   let outlineRadius = cornerRadius
   if (options.frame) {
-    const outer = frameInset - frameHalf
-    const inner = frameInset + frameHalf
-    // a rounded centre line would miss holes sitting in the corners
-    const cornerHoles = options.holes === 'corners' || (options.holes === 'sides' && options.holeAlign === 'top')
-    const radius = cornerHoles ? 0 : frameRadius
-    outlineRadius = frameInset + radius
-    framePath = roundedRect(outer, outer, width - 2 * outer, height - 2 * outer, radius + frameHalf) +
-      roundedRect(inner, inner, width - 2 * inner, height - 2 * inner, Math.max(0, radius - frameHalf))
+    // square inner corners; the outer edge and the label's cut line are rounded around them
+    const outer = frameOuter
+    outlineRadius = frameInner
+    framePath = roundedRect(outer, outer, width - 2 * outer, height - 2 * outer, frameWidth) +
+      roundedRect(frameInner, frameInner, width - 2 * frameInner, height - 2 * frameInner, 0)
     if (options.innerLine) {
-      // inside the frame without adding margin; moves inwards to clear holes by 1 mm
+      // inside the frame without adding margin
       const half = innerLineWidth / 2
-      const centre = frameInset + Math.max(frameHalf + innerLineGap, hasHoles ? r + 1 : 0) + half
-      // concentric with the frame's corners
-      const lineRadius = Math.max(0, radius - (centre - frameInset))
+      const centre = frameInner + innerLineGap + half
+      // square inner corners like the frame's
       framePath +=
-        roundedRect(centre - half, centre - half, width - 2 * (centre - half), height - 2 * (centre - half), lineRadius + half) +
-        roundedRect(centre + half, centre + half, width - 2 * (centre + half), height - 2 * (centre + half), Math.max(0, lineRadius - half))
+        roundedRect(centre - half, centre - half, width - 2 * (centre - half), height - 2 * (centre - half), innerLineWidth) +
+        roundedRect(centre + half, centre + half, width - 2 * (centre + half), height - 2 * (centre + half), 0)
     }
   }
 
@@ -208,8 +222,8 @@ export function layoutLabel(options: LabelOptions): Label {
     ],
   }[options.holes].map((hole) => ({ x: round(hole.x), y: round(hole.y), r }))
 
-  const textPath = paths.map((path) => path.toPathData(3)).join('')
-  const regionInset = options.frame ? frameInset + frameHalf : edgeMargin
+  const textPath = paths.map(pathData).join('')
+  const regionInset = options.frame ? frameInner : edgeMargin
   const pattern = options.pattern !== 'none'
     ? {
       style: options.pattern,
@@ -218,7 +232,8 @@ export function layoutLabel(options: LabelOptions): Label {
       region: { x1: regionInset, y1: regionInset, x2: width - regionInset, y2: height - regionInset },
       textPath,
       holes: holeList,
-      clearance: options.textSize * 0.5,
+      // the network's dots read as separate from the letters even when close
+      clearance: options.textSize * (options.pattern === 'network' ? 0.25 : 0.5),
       seed: options.patternSeed,
     }
     : undefined
