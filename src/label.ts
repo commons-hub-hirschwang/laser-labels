@@ -1,6 +1,7 @@
 import { parse, type Font, type Glyph, type Path } from 'opentype.js'
-import latinUrl from '@fontsource/source-sans-3/files/source-sans-3-latin-600-normal.woff?url'
-import latinExtUrl from '@fontsource/source-sans-3/files/source-sans-3-latin-ext-600-normal.woff?url'
+import latinUrl from '@fontsource/fira-sans/files/fira-sans-latin-500-normal.woff?url'
+import latinExtUrl from '@fontsource/fira-sans/files/fira-sans-latin-ext-500-normal.woff?url'
+import type { PatternInput, PatternStyle } from './pattern'
 
 // All geometry is in millimetres.
 
@@ -17,6 +18,11 @@ export interface LabelOptions {
   holeDiameter: number
   /** thin engraved frame inside the label edge */
   frame: boolean
+  /** thin second line inside the frame, drawn over the pattern */
+  innerLine: boolean
+  /** particle pattern around the text */
+  pattern: PatternStyle | 'none'
+  patternSeed: number
 }
 
 export interface Label {
@@ -24,14 +30,21 @@ export interface Label {
   height: number
   textPath: string
   framePath: string
+  /** grown separately (and animated) by createPattern */
+  pattern?: PatternInput
   cutPath: string
   holes: { x: number; y: number; r: number }[]
 }
 
-const cornerRadius = 1.5
+const cornerRadius = 1.5 // without frame; with frame the corners are concentric with the frame's
 const edgeMargin = 1.5 // between label edge, frame, holes and text
 const frameWidth = 2
+// distance of the frame's centre line from the label edge, fixed so holes don't change it;
+// holes sit on that line, which leaves 3 mm of wood around the largest (5 mm) hole
+const frameInset = 5.5
 const frameRadius = 1.5 // of the frame's centre line
+const innerLineWidth = 0.5
+const innerLineGap = 1.5 // wood between frame and inner line
 const lineHeightFactor = 1.2
 const minSize = 10
 
@@ -128,19 +141,19 @@ export function layoutLabel(options: LabelOptions): Label {
     y2: Math.max(ink?.y2 ?? 0, lastBaseline),
   }
 
-  const padding = Math.max(1.5, options.textSize * 0.35)
+  // the pattern keeps half a letter height away from the text, so it needs room
+  const padding = options.pattern !== 'none' ? options.textSize * 1.4 : Math.max(1.5, options.textSize * 0.35)
   const r = options.holeDiameter / 2
   const holeEdge = Math.max(3, options.holeDiameter) // wood between hole and label edge
-  const c = holeEdge + r // hole centre distance from edge
+  // hole centre distance from edge: on the frame's centre line if there is a frame
+  const c = options.frame ? frameInset : holeEdge + r
   const hasHoles = options.holes !== 'none'
 
   // distance from each label edge to the padded text area
   const inset = { left: edgeMargin, right: edgeMargin, top: edgeMargin, bottom: edgeMargin }
   const frameHalf = frameWidth / 2
-  // the frame's centre line runs through the hole centres, at the same inset on all sides
-  const frameCentre = hasHoles ? c : edgeMargin + frameHalf
   if (options.frame) {
-    const value = frameCentre + Math.max(frameHalf, hasHoles ? r : 0) + edgeMargin
+    const value = frameInset + Math.max(frameHalf, hasHoles ? r : 0) + edgeMargin
     inset.left = inset.right = inset.top = inset.bottom = value
   } else {
     const holeZone = c + r + edgeMargin
@@ -160,17 +173,29 @@ export function layoutLabel(options: LabelOptions): Label {
   for (const path of paths) translate(path, dx, dy)
 
   let framePath = ''
+  let outlineRadius = cornerRadius
   if (options.frame) {
-    const outer = frameCentre - frameHalf
-    const inner = frameCentre + frameHalf
+    const outer = frameInset - frameHalf
+    const inner = frameInset + frameHalf
     // a rounded centre line would miss holes sitting in the corners
     const cornerHoles = options.holes === 'corners' || (options.holes === 'sides' && options.holeAlign === 'top')
     const radius = cornerHoles ? 0 : frameRadius
+    outlineRadius = frameInset + radius
     framePath = roundedRect(outer, outer, width - 2 * outer, height - 2 * outer, radius + frameHalf) +
       roundedRect(inner, inner, width - 2 * inner, height - 2 * inner, Math.max(0, radius - frameHalf))
+    if (options.innerLine) {
+      // inside the frame without adding margin; moves inwards to clear holes by 1 mm
+      const half = innerLineWidth / 2
+      const centre = frameInset + Math.max(frameHalf + innerLineGap, hasHoles ? r + 1 : 0) + half
+      // concentric with the frame's corners
+      const lineRadius = Math.max(0, radius - (centre - frameInset))
+      framePath +=
+        roundedRect(centre - half, centre - half, width - 2 * (centre - half), height - 2 * (centre - half), lineRadius + half) +
+        roundedRect(centre + half, centre + half, width - 2 * (centre + half), height - 2 * (centre + half), Math.max(0, lineRadius - half))
+    }
   }
 
-  const holes = {
+  const holeList = {
     none: [],
     top: [{ x: width / 2, y: c }],
     sides: [
@@ -183,27 +208,45 @@ export function layoutLabel(options: LabelOptions): Label {
     ],
   }[options.holes].map((hole) => ({ x: round(hole.x), y: round(hole.y), r }))
 
+  const textPath = paths.map((path) => path.toPathData(3)).join('')
+  const regionInset = options.frame ? frameInset + frameHalf : edgeMargin
+  const pattern = options.pattern !== 'none'
+    ? {
+      style: options.pattern,
+      width,
+      height,
+      region: { x1: regionInset, y1: regionInset, x2: width - regionInset, y2: height - regionInset },
+      textPath,
+      holes: holeList,
+      clearance: options.textSize * 0.5,
+      seed: options.patternSeed,
+    }
+    : undefined
+
   width = round(width)
   height = round(height)
   return {
     width,
     height,
-    textPath: paths.map((path) => path.toPathData(3)).join(''),
+    textPath,
     framePath,
-    cutPath: roundedRect(0, 0, width, height, cornerRadius) + holes.map((h) => circle(h.x, h.y, h.r)).join(''),
-    holes,
+    pattern,
+    cutPath: roundedRect(0, 0, width, height, outlineRadius) + holeList.map((h) => circle(h.x, h.y, h.r)).join(''),
+    holes: holeList,
   }
 }
 
 /**
- * Laser convention: red hairline = cut, black = engrave.
- * xTool Studio / XCS create layers by stroke colour, so the text also gets a black stroke.
+ * Laser convention: red hairline = cut, black = engrave, blue = pattern (single lines,
+ * its own layer so it can get a lighter setting). xTool Studio / XCS create layers by
+ * stroke colour, so the text also gets a black stroke.
  */
-export function toSvg(label: Label) {
+export function toSvg(label: Label, patternPath: string) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${label.width}mm" height="${label.height}mm" viewBox="0 0 ${label.width} ${label.height}">
   <path id="engrave" d="${label.textPath}" fill="#000000" stroke="#000000" stroke-width="0.1"/>${label.framePath ? `
-  <path id="frame" d="${label.framePath}" fill="#000000" fill-rule="evenodd" stroke="#000000" stroke-width="0.1"/>` : ''}
+  <path id="frame" d="${label.framePath}" fill="#000000" fill-rule="evenodd" stroke="#000000" stroke-width="0.1"/>` : ''}${patternPath ? `
+  <path id="pattern" d="${patternPath}" fill="none" stroke="#0000FF" stroke-width="0.1"/>` : ''}
   <path id="cut" d="${label.cutPath}" fill="none" stroke="#FF0000" stroke-width="0.1"/>
 </svg>
 `

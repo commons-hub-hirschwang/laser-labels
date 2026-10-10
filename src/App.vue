@@ -1,15 +1,23 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { fileName, layoutLabel, loadFonts, toSvg, type LabelOptions } from './label'
+import { createPattern, type Pattern } from './pattern'
 
 const options = reactive<LabelOptions>({
   text: 'Mehl\nWeizen 700',
-  textSize: 6,
+  textSize: 10,
   holes: 'none',
   holeAlign: 'middle',
   holeDiameter: 3,
   frame: true,
+  innerLine: true,
+  pattern: 'flow',
+  patternSeed: 1,
 })
+
+function reshufflePattern() {
+  options.patternSeed = Math.floor(Math.random() * 2 ** 31)
+}
 
 // logarithmic slider: equal slider steps change the letter height by equal ratios
 const minTextSize = 3
@@ -36,6 +44,31 @@ loadFonts().then(() => (fontsLoaded.value = true))
 
 const label = computed(() => (fontsLoaded.value ? layoutLabel(options) : undefined))
 
+// the pattern grows visibly; larger labels grow faster so the animation takes similarly long
+let pattern: Pattern | undefined
+let animationFrame = 0
+const patternPath = ref('')
+watch(label, (current) => {
+  cancelAnimationFrame(animationFrame)
+  patternPath.value = ''
+  pattern = current?.pattern && createPattern(current.pattern)
+  if (!pattern) return
+  const growing = pattern
+  const stepsPerFrame = Math.max(50, (current!.width * current!.height) / 60)
+  const animate = () => {
+    const done = growing.advance(stepsPerFrame)
+    patternPath.value = growing.path()
+    if (!done) animationFrame = requestAnimationFrame(animate)
+  }
+  animate()
+}, { immediate: true })
+
+const patternStyles = [
+  { value: 'none', label: 'None' },
+  { value: 'contours', label: 'Contours' },
+  { value: 'flow', label: 'Flow' },
+] as const
+
 const holeModes = [
   { value: 'none', label: 'None' },
   { value: 'top', label: '1 · top' },
@@ -44,7 +77,13 @@ const holeModes = [
 ] as const
 
 function svgFile() {
-  return new File([toSvg(label.value!)], fileName(options.text), { type: 'image/svg+xml' })
+  if (pattern) {
+    // finish growing right away instead of waiting for the animation
+    cancelAnimationFrame(animationFrame)
+    pattern.advance(Infinity)
+    patternPath.value = pattern.path()
+  }
+  return new File([toSvg(label.value!, patternPath.value)], fileName(options.text), { type: 'image/svg+xml' })
 }
 
 function download() {
@@ -80,6 +119,7 @@ async function share() {
       >
         <g :transform="`translate(0 ${previewBox.labelY})`">
           <path class="wood" :d="label.cutPath" fill-rule="evenodd" />
+          <path class="pattern" :d="patternPath" />
           <path class="engraving" :d="label.framePath" fill-rule="evenodd" />
           <path class="engraving" :d="label.textPath" />
         </g>
@@ -109,6 +149,24 @@ async function share() {
         Engraved frame
       </label>
 
+      <label v-if="options.frame" class="choice">
+        <input v-model="options.innerLine" type="checkbox" />
+        Thin inner line
+      </label>
+
+      <fieldset>
+        <legend>Background pattern</legend>
+        <div class="choices">
+          <label v-for="style in patternStyles" :key="style.value" class="choice">
+            <input v-model="options.pattern" type="radio" :value="style.value" />
+            {{ style.label }}
+          </label>
+          <button v-if="options.pattern !== 'none'" type="button" class="secondary" @click="reshufflePattern">
+            Regenerate
+          </button>
+        </div>
+      </fieldset>
+
       <fieldset>
         <legend>Holes</legend>
         <label v-for="mode in holeModes" :key="mode.value" class="choice">
@@ -136,7 +194,9 @@ async function share() {
 
     <aside>
       In xTool Studio / XCS: set the <strong class="cut">red layer</strong> to <em>Cut</em> and the
-      <strong>black layer</strong> to <em>Engrave</em>, and process the black layer first.
+      <strong>black layer</strong> to <em>Engrave</em>. The <strong class="score">blue layer</strong> is the
+      pattern: give it a lighter setting, e.g. <em>Score</em> with low power. Process engraving and pattern before
+      cutting.
     </aside>
   </main>
 </template>

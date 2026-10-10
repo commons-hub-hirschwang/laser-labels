@@ -9,6 +9,7 @@
   --wood-edge: #6b4423;
   --engraving: #5a3a1e;
   --cut: #d22;
+  --score: #24c;
 
   font: 16px/1.5 system-ui, sans-serif;
   color: var(--text);
@@ -25,6 +26,7 @@
     --border: #3d3630;
     --accent: #d39a5f;
     --cut: #f55;
+    --score: #68f;
   }
 }
 
@@ -41,6 +43,8 @@ main {
   margin: 0 auto;
   padding: 1rem;
   display: grid;
+  /* minmax(0, …) lets the column shrink below its content instead of overflowing */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.5rem;
 
   & h1 {
@@ -72,6 +76,15 @@ main {
 
   & .engraving {
     fill: var(--engraving);
+  }
+
+  & .pattern {
+    fill: none;
+    stroke: var(--engraving);
+    stroke-width: 0.12;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.7;
   }
 
   & .coin {
@@ -137,8 +150,11 @@ form {
     accent-color: var(--accent);
   }
 
-  & .actions {
+  & .actions,
+  & .choices {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 0.5rem;
   }
 
@@ -154,6 +170,13 @@ form {
     &:disabled {
       opacity: 0.5;
     }
+
+    &.secondary {
+      padding: 0.25rem 0.75rem;
+      background: none;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+    }
   }
 }
 
@@ -162,5 +185,9 @@ aside {
 
   & .cut {
     color: var(--cut);
+  }
+
+  & .score {
+    color: var(--score);
   }
 }
