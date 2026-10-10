@@ -1,0 +1,166 @@
+:root {
+  --text: #2b2622;
+  --muted: #7a6f66;
+  --bg: #f7f4ef;
+  --surface: #fff;
+  --border: #ddd5ca;
+  --accent: #8a5a2b;
+  --wood: #e2c39b;
+  --wood-edge: #6b4423;
+  --engraving: #5a3a1e;
+  --cut: #d22;
+
+  font: 16px/1.5 system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #ede6dd;
+    --muted: #a3988d;
+    --bg: #1d1a17;
+    --surface: #27231f;
+    --border: #3d3630;
+    --accent: #d39a5f;
+    --cut: #f55;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1rem;
+  display: grid;
+  gap: 1.5rem;
+
+  & h1 {
+    margin: 0;
+    font-size: 1.5rem;
+  }
+}
+
+.preview {
+  display: grid;
+  justify-items: center;
+  gap: 0.5rem;
+  padding: 1.5rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+
+  & svg {
+    width: 100%;
+    max-height: 50vh;
+    overflow: visible;
+  }
+
+  & .wood {
+    fill: var(--wood);
+    stroke: var(--wood-edge);
+    stroke-width: 0.3;
+  }
+
+  & .engraving {
+    fill: var(--engraving);
+  }
+
+  & .coin {
+    & .ring {
+      fill: #c9a94e;
+    }
+
+    & .core {
+      fill: #c4c4c0;
+    }
+
+    & text {
+      font-size: 6px;
+      font-weight: 600;
+      text-anchor: middle;
+      fill: #6d6d68;
+    }
+  }
+
+  & .dimensions {
+    margin: 0;
+    color: var(--muted);
+  }
+}
+
+form {
+  display: grid;
+  gap: 1rem;
+
+  & label {
+    display: grid;
+    gap: 0.25rem;
+
+    &.choice {
+      display: inline-flex;
+      align-items: center;
+      margin-right: 1rem;
+    }
+  }
+
+  & fieldset {
+    margin: 0;
+    padding: 0;
+    border: none;
+
+    & legend {
+      padding: 0;
+      margin-bottom: 0.25rem;
+    }
+  }
+
+  & textarea {
+    font: inherit;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    background: var(--surface);
+    color: inherit;
+    resize: vertical;
+  }
+
+  & input {
+    accent-color: var(--accent);
+  }
+
+  & .actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  & button {
+    font: inherit;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 0.25rem;
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+
+    &:disabled {
+      opacity: 0.5;
+    }
+  }
+}
+
+aside {
+  color: var(--muted);
+
+  & .cut {
+    color: var(--cut);
+  }
+}
