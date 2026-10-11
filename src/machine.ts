@@ -25,8 +25,8 @@ export interface LaserSettings {
 }
 
 export const plywoodSettings: LaserSettings = {
-  engrave: { power: 27, speed: 200 },
-  pattern: { power: 25, speed: 117 },
+  engrave: { power: 25, speed: 200 },
+  pattern: { power: 20, speed: 100 },
   cut: { power: 100, speed: 15 },
 }
 

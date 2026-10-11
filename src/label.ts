@@ -2,11 +2,13 @@ import { parse, type Font, type Glyph, type Path } from 'opentype.js'
 import latinUrl from '@fontsource/fira-sans/files/fira-sans-latin-500-normal.woff?url'
 import latinExtUrl from '@fontsource/fira-sans/files/fira-sans-latin-ext-500-normal.woff?url'
 import type { PatternInput, PatternStyle } from './pattern'
+import { qrModules } from './qr'
 
 // All geometry is in millimetres.
 
 export type HoleMode = 'none' | 'top' | 'sides' | 'corners'
 export type HoleAlign = 'top' | 'middle'
+export type QrPosition = 'none' | 'left' | 'right' | 'top' | 'bottom'
 
 export interface LabelOptions {
   text: string
@@ -25,6 +27,12 @@ export interface LabelOptions {
   /** particle pattern around the text */
   pattern: PatternStyle | 'none'
   patternSeed: number
+  /** beside the text; without text the label holds only the QR code */
+  qrPosition: QrPosition
+  /** usually a URL */
+  qrContent: string
+  /** side length without quiet zone */
+  qrSize: number
 }
 
 export interface Label {
@@ -36,6 +44,10 @@ export interface Label {
   pattern?: PatternInput
   cutPath: string
   holes: { x: number; y: number; r: number }[]
+  /** dark QR modules, engraved like the text */
+  qrPath: string
+  qr?: { modules: number; moduleSize: number }
+  qrError?: string
 }
 
 const cornerRadius = 1.5 // without frame; with frame the corners are concentric with the frame's outer corners
@@ -47,6 +59,10 @@ const innerLineWidth = 0.5
 const innerLineGap = 1.5 // wood between frame and inner line
 const lineHeightFactor = 1.2
 const minSize = 10
+/** light modules around a QR code, kept free of pattern and edges */
+const qrQuietModules = 2
+/** half the engrave stroke width (see toSvg): QR modules shrink by it so they burn at their size */
+const strokeHalf = 0.05
 
 // Fontsource splits fonts by unicode range; the first font containing a glyph wins.
 let fonts: Font[] = []
@@ -157,8 +173,42 @@ export function layoutLabel(options: LabelOptions): Label {
     y2: Math.max(ink?.y2 ?? 0, lastBaseline),
   }
 
+  let qrModulesGrid: boolean[][] | undefined
+  let qrError: string | undefined
+  if (options.qrPosition !== 'none' && options.qrContent.trim()) {
+    try {
+      qrModulesGrid = qrModules(options.qrContent.trim())
+    } catch {
+      qrError = 'Too long for a QR code'
+    }
+  }
+  const moduleSize = qrModulesGrid ? options.qrSize / qrModulesGrid.length : 0
+  const quietZone = qrQuietModules * moduleSize
+
+  // without text the QR code sets the scale that the padding refers to
+  const scale = ink || !qrModulesGrid ? options.textSize : options.qrSize / 5
   // the pattern keeps half a letter height away from the text, so it only shows above 0.5
-  const padding = Math.max(1.5, options.textSize * options.padding)
+  const padding = Math.max(1.5, scale * options.padding, quietZone)
+
+  // the QR code sits beside the text, centred on it, one padding away
+  const content = { ...text }
+  let qrBox: { x1: number; y1: number; x2: number; y2: number } | undefined
+  if (qrModulesGrid) {
+    const size = options.qrSize
+    const middle = { x: (text.x1 + text.x2) / 2, y: (text.y1 + text.y2) / 2 }
+    const position = ink ? options.qrPosition : 'none'
+    const x1 = position === 'left' ? text.x1 - padding - size : position === 'right' ? text.x2 + padding : middle.x - size / 2
+    const y1 = position === 'top' ? text.y1 - padding - size : position === 'bottom' ? text.y2 + padding : middle.y - size / 2
+    qrBox = { x1, y1, x2: x1 + size, y2: y1 + size }
+    if (ink) {
+      content.x1 = Math.min(text.x1, qrBox.x1)
+      content.y1 = Math.min(text.y1, qrBox.y1)
+      content.x2 = Math.max(text.x2, qrBox.x2)
+      content.y2 = Math.max(text.y2, qrBox.y2)
+    } else {
+      Object.assign(content, qrBox)
+    }
+  }
   const r = options.holeDiameter / 2
   const holeEdge = Math.max(3, options.holeDiameter) // wood between hole and label edge
   const frameHalf = frameWidth / 2
@@ -179,16 +229,35 @@ export function layoutLabel(options: LabelOptions): Label {
     if (options.holes === 'sides' || options.holes === 'corners') inset.left = inset.right = holeZone
   }
 
-  let width = text.x2 - text.x1 + 2 * padding + inset.left + inset.right
-  let height = text.y2 - text.y1 + 2 * padding + inset.top + inset.bottom
+  let width = content.x2 - content.x1 + 2 * padding + inset.left + inset.right
+  let height = content.y2 - content.y1 + 2 * padding + inset.top + inset.bottom
   if (options.holes === 'corners') height = Math.max(height, 2 * (c + r) + holeEdge)
   width = Math.max(width, minSize)
   height = Math.max(height, minSize)
 
-  // centre text inside the area not reserved for holes and frame
-  const dx = inset.left + (width - inset.left - inset.right) / 2 - (text.x1 + text.x2) / 2
-  const dy = inset.top + (height - inset.top - inset.bottom) / 2 - (text.y1 + text.y2) / 2
+  // centre text and QR code inside the area not reserved for holes and frame
+  const dx = inset.left + (width - inset.left - inset.right) / 2 - (content.x1 + content.x2) / 2
+  const dy = inset.top + (height - inset.top - inset.bottom) / 2 - (content.y1 + content.y2) / 2
   for (const path of paths) translate(path, dx, dy)
+
+  // one rectangle per run of dark modules in a row, narrowed so the stroke doesn't widen it
+  let qrPath = ''
+  if (qrModulesGrid && qrBox) {
+    const left = qrBox.x1 + dx
+    const top = qrBox.y1 + dy
+    qrModulesGrid.forEach((row, rowIndex) => {
+      let start = -1
+      row.concat(false).forEach((dark, column) => {
+        if (dark && start < 0) start = column
+        if (!dark && start >= 0) {
+          const [x1, x2] = [left + start * moduleSize + strokeHalf, left + column * moduleSize - strokeHalf].map(round)
+          const [y1, y2] = [top + rowIndex * moduleSize, top + (rowIndex + 1) * moduleSize].map(round)
+          qrPath += `M${x1} ${y1}H${x2}V${y2}H${x1}Z`
+          start = -1
+        }
+      })
+    })
+  }
 
   let framePath = ''
   let outlineRadius = cornerRadius
@@ -232,6 +301,9 @@ export function layoutLabel(options: LabelOptions): Label {
       region: { x1: regionInset, y1: regionInset, x2: width - regionInset, y2: height - regionInset },
       textPath,
       holes: holeList,
+      keepOut: qrBox
+        ? [{ x1: qrBox.x1 + dx - quietZone, y1: qrBox.y1 + dy - quietZone, x2: qrBox.x2 + dx + quietZone, y2: qrBox.y2 + dy + quietZone }]
+        : [],
       // the network's dots read as separate from the letters even when close
       clearance: options.textSize * (options.pattern === 'network' ? 0.25 : 0.5),
       seed: options.patternSeed,
@@ -248,6 +320,9 @@ export function layoutLabel(options: LabelOptions): Label {
     pattern,
     cutPath: roundedRect(0, 0, width, height, outlineRadius) + holeList.map((h) => circle(h.x, h.y, h.r)).join(''),
     holes: holeList,
+    qrPath,
+    qr: qrModulesGrid && { modules: qrModulesGrid.length, moduleSize },
+    qrError,
   }
 }
 
@@ -259,7 +334,7 @@ export function layoutLabel(options: LabelOptions): Label {
 export function toSvg(label: Label, patternPath: string) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${label.width}mm" height="${label.height}mm" viewBox="0 0 ${label.width} ${label.height}">
-  <path id="engrave" d="${label.textPath}" fill="#000000" stroke="#000000" stroke-width="0.1"/>${label.framePath ? `
+  <path id="engrave" d="${label.textPath}${label.qrPath}" fill="#000000" stroke="#000000" stroke-width="0.1"/>${label.framePath ? `
   <path id="frame" d="${label.framePath}" fill="#000000" fill-rule="evenodd" stroke="#000000" stroke-width="0.1"/>` : ''}${patternPath ? `
   <path id="pattern" d="${patternPath}" fill="none" stroke="#0000FF" stroke-width="0.1"/>` : ''}
   <path id="cut" d="${label.cutPath}" fill="none" stroke="#FF0000" stroke-width="0.1"/>

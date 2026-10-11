@@ -29,6 +29,8 @@ export interface PatternInput {
   /** SVG path data of the text */
   textPath: string
   holes: { x: number; y: number; r: number }[]
+  /** areas the pattern stays out of entirely, e.g. a QR code with its quiet zone */
+  keepOut: { x1: number; y1: number; x2: number; y2: number }[]
   /** distance kept to text; the pattern runs right up to the region edge */
   clearance: number
   seed: number
@@ -81,6 +83,7 @@ function freeMask(input: PatternInput, resolution: number) {
     context.arc(hole.x, hole.y, hole.r + minDistance, 0, 2 * Math.PI)
     context.fill()
   }
+  for (const box of input.keepOut) context.fillRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1)
 
   const pixels = context.getImageData(0, 0, columns, rows).data
   return (x: number, y: number) => {

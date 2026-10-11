@@ -6,6 +6,12 @@ import { bed, deviceStates, focusZ, material, plywoodSettings, type LaserSetting
 import type { Point } from './pathGeometry'
 import { S1, serialSupported } from './s1'
 
+// Web Serial only exists on https or localhost
+const serialMissing = !serialSupported && (window.isSecureContext
+  ? 'Sending to the laser needs a browser with Web Serial, e.g. an up-to-date Chrome or Edge on a computer. ' +
+    'Firefox and Safari don\'t support it.'
+  : 'Sending to the laser needs a secure connection (https) for Web Serial. Open this page via https.')
+
 const props = defineProps<{
   label: Label
   text: string
@@ -71,9 +77,52 @@ function startDrag(event: PointerEvent) {
 function drag(event: PointerEvent) {
   if (!dragStart) return
   const point = bedPoint(event)
-  position.x = dragStart.position.x + point.x - dragStart.pointer.x
-  position.y = dragStart.position.y + point.y - dragStart.pointer.y
+  Object.assign(position, snap({
+    x: dragStart.position.x + point.x - dragStart.pointer.x,
+    y: dragStart.position.y + point.y - dragStart.pointer.y,
+  }))
   clampPosition()
+}
+
+/** wood left between cut lines when snapping */
+const snapGap = 2
+const snapDistance = 3
+
+/**
+ * Snaps to 2 mm beside earlier labels and the bed edges, or in line with earlier labels' edges.
+ * X and Y snap independently, to the closest candidate.
+ */
+function snap(raw: Point): Point {
+  const { width, height } = props.label
+  const result = { ...raw }
+  const best = { x: snapDistance, y: snapDistance }
+  const consider = (axis: 'x' | 'y', candidate: number) => {
+    const distance = Math.abs(candidate - raw[axis])
+    if (distance < best[axis]) {
+      best[axis] = distance
+      result[axis] = candidate
+    }
+  }
+  consider('x', snapGap)
+  consider('x', bed.width - snapGap - width)
+  consider('y', snapGap)
+  consider('y', bed.height - snapGap - height)
+  for (const cut of history.value) {
+    // beside a label only when level with it
+    if (raw.y < cut.y + cut.height + snapGap && cut.y < raw.y + height + snapGap) {
+      consider('x', cut.x + cut.width + snapGap)
+      consider('x', cut.x - snapGap - width)
+    }
+    if (raw.x < cut.x + cut.width + snapGap && cut.x < raw.x + width + snapGap) {
+      consider('y', cut.y + cut.height + snapGap)
+      consider('y', cut.y - snapGap - height)
+    }
+    consider('x', cut.x)
+    consider('x', cut.x + cut.width - width)
+    consider('y', cut.y)
+    consider('y', cut.y + cut.height - height)
+  }
+  return result
 }
 const endDrag = () => (dragStart = undefined)
 
@@ -85,8 +134,10 @@ const crossOffset = ref<Point>({ x: 0, y: 0 })
 const progress = ref<number>()
 const error = ref('')
 const plywoodConfirmed = ref(false)
-/** the label being cut, added to the history when the S1 reports done */
-let running: CutLabel | undefined
+/** job uploaded, the S1 waits for its button */
+const waitingForButton = ref(false)
+/** the label just sent, added to the history once the S1 starts it */
+let sent: CutLabel | undefined
 
 const stateText = computed(() => {
   if (progress.value !== undefined) return `Uploading… ${Math.round(progress.value * 100)} %`
@@ -100,15 +151,17 @@ async function connect() {
     const machine = await S1.connect()
     machine.onState = (value) => {
       state.value = value
-      if (value === 19 && running) {
-        history.value.push(running)
-        running = undefined
+      if (value === 14) {
+        waitingForButton.value = false
+        if (sent) history.value.push(sent)
+        sent = undefined
       }
     }
     machine.onPosition = (value) => (head.value = value)
     machine.onClose = () => {
       s1.value = undefined
       state.value = undefined
+      waitingForButton.value = false
     }
     s1.value = machine
     crossOffset.value = await machine.crossOffset()
@@ -140,7 +193,7 @@ async function showCorner(corner: Point) {
 
 function job() {
   return generateJob({
-    textPath: props.label.textPath,
+    textPath: props.label.textPath + props.label.qrPath,
     framePath: props.label.framePath,
     patternPath: props.finishPattern(),
     cutPath: props.label.cutPath,
@@ -158,8 +211,9 @@ async function send() {
   try {
     const { width, height, cutPath } = props.label
     await s1.value!.sendJob(job(), (fraction) => (progress.value = fraction))
-    running = { text: props.text.trim().split('\n')[0]!, cutPath, x: position.x, y: position.y, width, height, date: new Date().toISOString() }
+    sent = { text: props.text.trim().split('\n')[0]!, cutPath, x: position.x, y: position.y, width, height, date: new Date().toISOString() }
     plywoodConfirmed.value = false // asked again for every label
+    waitingForButton.value = true
   } catch (reason) {
     error.value = (reason as Error).message
   } finally {
@@ -213,12 +267,13 @@ function downloadGcode() {
         <rect class="area" :width="bed.width" :height="bed.height" />
         <path
           v-for="(cut, index) in history"
-          :key="index"
+          :key="cut.date"
           class="cut-before"
           :d="cut.cutPath"
           :transform="`translate(${cut.x} ${cut.y})`"
+          @click="history.splice(index, 1)"
         >
-          <title>{{ cut.text }}, {{ new Date(cut.date).toLocaleDateString() }}</title>
+          <title>{{ cut.text }}, {{ new Date(cut.date).toLocaleDateString() }} – click to remove</title>
         </path>
         <path
           class="current"
@@ -238,13 +293,15 @@ function downloadGcode() {
       </div>
       <p v-if="overlaps" class="warning">The label overlaps a label cut earlier. Move it to free wood.</p>
       <div v-if="history.length" class="choices">
-        <span class="muted">{{ history.length }} label{{ history.length === 1 ? '' : 's' }} cut on this wood</span>
-        <button type="button" class="secondary" @click="history.pop()">Remove last</button>
+        <span class="muted">
+          {{ history.length }} label{{ history.length === 1 ? '' : 's' }} cut on this wood. Drag the new one next to them,
+          it snaps {{ snapGap }} mm away. Click an old one to remove it.
+        </span>
         <button type="button" class="secondary" @click="history = []">New wood</button>
       </div>
     </fieldset>
 
-    <p v-if="!serialSupported" class="muted">Sending to the S1 needs Chrome or Edge (Web Serial).</p>
+    <p v-if="serialMissing" class="warning">{{ serialMissing }} You can still download the SVG or the G-code.</p>
     <template v-else>
       <div class="actions">
         <button v-if="!s1" type="button" @click="connect">Connect S1 (USB)</button>
@@ -272,10 +329,12 @@ function downloadGcode() {
       </label>
     </template>
 
+    <p v-if="waitingForButton" class="warning">Job sent. <strong>Press the button on the S1 to start it.</strong></p>
     <p v-if="error" class="warning">{{ error }}</p>
 
     <div class="actions">
       <button v-if="serialSupported" type="button" :disabled="!canSend" @click="send">Send to S1</button>
+      <span v-if="serialSupported && !waitingForButton" class="muted">Then start it with the button on the machine.</span>
       <button type="button" class="secondary" @click="downloadGcode">Download G-code</button>
     </div>
   </form>

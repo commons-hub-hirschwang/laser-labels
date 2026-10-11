@@ -15,6 +15,9 @@ const defaults: LabelOptions = {
   innerLine: true,
   pattern: 'network',
   patternSeed: 1,
+  qrPosition: 'none',
+  qrContent: '',
+  qrSize: 20,
 }
 
 const patternStyles = [
@@ -99,6 +102,19 @@ watch(label, (current) => {
   animate()
 }, { immediate: true })
 
+const qrPositions = [
+  { value: 'none', label: 'None' },
+  { value: 'left', label: 'Left' },
+  { value: 'right', label: 'Right' },
+  { value: 'top', label: 'Above' },
+  { value: 'bottom', label: 'Below' },
+] as const
+
+const hasText = computed(() => options.text.trim() !== '')
+const qrOnly = computed(() => !hasText.value && !!label.value?.qr)
+/** below this, phone cameras start to struggle with engraved wood */
+const minModuleSize = 0.5
+
 const holeModes = [
   { value: 'none', label: 'None' },
   { value: 'top', label: '1 · top' },
@@ -159,6 +175,7 @@ async function share() {
           <path class="pattern" :d="patternPath" />
           <path class="engraving" :d="label.framePath" fill-rule="evenodd" />
           <path class="engraving" :d="label.textPath" />
+          <path class="engraving" :d="label.qrPath" />
           <!-- holes are cut through everything, so they go on top -->
           <circle v-for="(hole, index) in label.holes" :key="index" class="hole" :cx="hole.x" :cy="hole.y" :r="hole.r" />
         </g>
@@ -178,13 +195,13 @@ async function share() {
         <textarea v-model="options.text" rows="3" />
       </label>
 
-      <label>
+      <label v-if="!qrOnly">
         Letter height: {{ options.textSize }} mm
         <input v-model.number="textSizeSlider" type="range" min="0" max="1" step="0.001" />
       </label>
 
       <label>
-        Padding: {{ options.padding.toFixed(1) }} × letter height
+        Padding: {{ options.padding.toFixed(1) }} × {{ qrOnly ? '⅕ QR size' : 'letter height' }}
         <input v-model.number="options.padding" type="range" min="0.2" max="3" step="0.1" />
       </label>
 
@@ -210,6 +227,34 @@ async function share() {
           </button>
         </div>
       </fieldset>
+
+      <fieldset>
+        <legend>QR code</legend>
+        <div class="choices">
+          <label v-for="position in qrPositions" :key="position.value" class="choice">
+            <input v-model="options.qrPosition" type="radio" :value="position.value" />
+            {{ position.label }}
+          </label>
+        </div>
+      </fieldset>
+
+      <template v-if="options.qrPosition !== 'none'">
+        <label>
+          QR content
+          <input v-model="options.qrContent" type="url" placeholder="https://…" />
+        </label>
+        <p v-if="!hasText" class="muted">No text: the label holds only the QR code.</p>
+
+        <label>
+          QR size: {{ options.qrSize }} mm
+          <input v-model.number="options.qrSize" type="range" min="10" max="60" step="1" />
+        </label>
+        <p v-if="label?.qrError" class="warning">{{ label.qrError }}</p>
+        <p v-else-if="label?.qr && label.qr.moduleSize < minModuleSize" class="warning">
+          The QR dots are only {{ label.qr.moduleSize.toFixed(2) }} mm; phones may not read them on wood. Make the QR
+          code bigger or the content shorter.
+        </p>
+      </template>
 
       <fieldset>
         <legend>Holes</legend>

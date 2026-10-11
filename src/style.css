@@ -183,7 +183,8 @@ form {
   }
 
   & textarea,
-  & input[type='number'] {
+  & input[type='number'],
+  & input[type='url'] {
     font: inherit;
     padding: 0.5rem;
     border: 1px solid var(--border);
@@ -235,6 +236,11 @@ form {
 
     & .cut-before {
       fill: var(--border);
+      cursor: pointer;
+
+      &:hover {
+        fill: var(--cut);
+      }
     }
 
     & .current {
