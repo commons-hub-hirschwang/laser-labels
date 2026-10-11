@@ -25,6 +25,21 @@ Only two routes run natively on Linux today: LightBurn (closed, paid, free trial
 - **Text** in an SVG must already be outlines. Imported size depends on an **import DPI setting**, so check the size once.
 - **Our label app** (`lable-printer`, Vue + Vite) exports the common laser convention: outline and drill holes as a red `#FF0000` hairline (cut), text as black-filled outlines with a black stroke (engrave), size in mm. LightBurn also turns these colours into layers, so the same file works there.
 
+## Decoded USB protocol (2026-10-11)
+
+Recorded with USBPcap while xTool Studio 1.9.11 cut two labels (`reference-files/`). Details checked against Studio's own JavaScript (`F3F4Uploader` in `app.asar`). The label app now speaks this protocol over Web Serial; see `src/s1.ts` and `src/gcode.ts`.
+
+- **USB:** CDC serial device `28e9:018a` (GigaDevice). No encryption.
+- **Commands:** text lines, each sent as `<command>\n\n`. The S1 answers an M-code with a line starting with the same code (`M100` → `M100 "xTool S1"`). G-code moves get no answer. The S1 also pushes lines on its own, mainly `M222 S<state>`.
+- **States (`M222`):** 3 ready, 13 job uploaded and waiting for the machine's button, 14 running, 19 done, 7 lid open, 9 flame.
+- **Job upload:** `M362`, `M321`, `M25`, `M2240`, `M810 "<uuid>"`, then the file `tmp.gcode` in binary frames, then `M323 S1`. The job starts when someone presses the button on the S1.
+- **Frames:** `F3 · header sum · length u16 LE · payload · payload sum · F4`. Both sums are byte sums & 0xFF; the header sum covers `F3` and the length. Payload: `01 01 5E · cmd · data length u16 LE · data`.
+  - cmd `01` announces the file: `00 · size u32 LE · checksum (4 bytes) · name`. The checksum XORs the file onto itself in 4-byte steps: byte *i* goes into checksum byte *i* mod 4.
+  - cmd `02` carries up to 16 KB: `offset u32 LE · bytes`.
+  - The S1 acknowledges every frame with cmd `F0`. Frame byte 10 = 1 means error.
+- **G-code:** `S` is 0–1000, `F` is in mm/min. Machine X/Y = SVG millimetres + the label's position, no flip. Work area 498 × 330 for the 10/20 W module. Blocks: bitmap (`M4`, rows 0.1 mm apart, laser-off run-up v²/(2·3200) at both ends), vector engrave (`M4`), cut (`M3`, air assist `M15 S4`). `G0Z52.541` is the focus height the S1 measured on 3 mm plywood.
+- **Red cross:** `M1109` returns its offset from the laser for the lowest and highest head position. `G0 X… Y… F9600` moves the head.
+
 ## Test plan for the superuser
 
 Go for LightBurn over USB first: it is the shortest way to a real cut from Linux. Use the test to collect G-code, which opens the open-source route. Allow about 2 hours.

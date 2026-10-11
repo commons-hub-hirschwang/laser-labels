@@ -25,3 +25,6 @@ dist-ssr
 
 # local scratch (e.g. cloned reference repos)
 temp
+
+# USB captures of xTool Studio jobs (they also contain keyboard input)
+reference-files

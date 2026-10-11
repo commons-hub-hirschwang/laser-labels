@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { fileName, layoutLabel, loadFonts, toSvg, type LabelOptions } from './label'
 import { createPattern, type Pattern } from './pattern'
+import LaserPanel from './LaserPanel.vue'
 
 const defaults: LabelOptions = {
   text: 'Mehl\nWeizen 700',
@@ -105,14 +106,18 @@ const holeModes = [
   { value: 'corners', label: '4 · corners' },
 ] as const
 
-function svgFile() {
+/** finishes growing right away instead of waiting for the animation */
+function finishPattern() {
   if (pattern) {
-    // finish growing right away instead of waiting for the animation
     cancelAnimationFrame(animationFrame)
     pattern.advance(Infinity)
     patternPath.value = pattern.path()
   }
-  return new File([toSvg(label.value!, patternPath.value)], fileName(options.text), { type: 'image/svg+xml' })
+  return patternPath.value
+}
+
+function svgFile() {
+  return new File([toSvg(label.value!, finishPattern())], fileName(options.text), { type: 'image/svg+xml' })
 }
 
 function download() {
@@ -231,8 +236,10 @@ async function share() {
       </div>
     </form>
 
+    <LaserPanel v-if="label" :label="label" :text="options.text" :finish-pattern="finishPattern" />
+
     <aside>
-      In xTool Studio / XCS: set the <strong class="cut">red layer</strong> to <em>Cut</em> and the
+      Without the S1 on USB, or for other materials, download the SVG. In xTool Studio / XCS: set the <strong class="cut">red layer</strong> to <em>Cut</em> and the
       <strong>black layer</strong> to <em>Engrave</em>. The <strong class="score">blue layer</strong> is the
       pattern: give it a lighter setting, e.g. <em>Score</em> with low power. Process engraving and pattern before
       cutting.

@@ -10,6 +10,7 @@
   --engraving: #5a3a1e;
   --cut: #d22;
   --score: #24c;
+  --warning-bg: #fbecd5;
 
   font: 16px/1.5 system-ui, sans-serif;
   color: var(--text);
@@ -27,6 +28,7 @@
     --accent: #d39a5f;
     --cut: #f55;
     --score: #68f;
+    --warning-bg: #3d2c17;
   }
 }
 
@@ -54,10 +56,22 @@ main {
     gap: 1rem;
   }
 
-  & h1 {
+  & h1,
+  & h2 {
     margin: 0;
     font-size: 1.5rem;
   }
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.warning {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.25rem;
+  background: var(--warning-bg);
 }
 
 button {
@@ -168,7 +182,8 @@ form {
     }
   }
 
-  & textarea {
+  & textarea,
+  & input[type='number'] {
     font: inherit;
     padding: 0.5rem;
     border: 1px solid var(--border);
@@ -190,6 +205,59 @@ form {
     gap: 0.5rem;
   }
 
+  & input[type='number'] {
+    width: 5rem;
+    padding: 0.25rem 0.5rem;
+    margin: 0 0.25rem;
+  }
+}
+
+.laser {
+  padding: 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+
+  & .layer {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: 0.25rem 1rem;
+  }
+
+  & .bed {
+    width: 100%;
+    touch-action: none;
+
+    & .area {
+      fill: var(--bg);
+      stroke: var(--border);
+    }
+
+    & .cut-before {
+      fill: var(--border);
+    }
+
+    & .current {
+      fill: var(--wood);
+      stroke: var(--wood-edge);
+      stroke-width: 0.5;
+      cursor: move;
+
+      &.overlaps {
+        stroke: var(--cut);
+        stroke-width: 1.5;
+      }
+    }
+
+    & .head path {
+      stroke: var(--cut);
+      stroke-width: 1;
+    }
+  }
+
+  & .status {
+    font-weight: 600;
+  }
 }
 
 aside {
