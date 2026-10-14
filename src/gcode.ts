@@ -18,8 +18,6 @@ export interface JobInput {
   date?: Date
 }
 
-/** bitmap line spacing (Studio's "density": 10 lines per mm) */
-const lineSpacing = 0.1
 /** the black layers' 0.1 mm outline stroke, which Studio burns too */
 const strokeGrow = 0.05
 /** Studio shifts right-to-left rows by this much (at 200 mm/s) */
@@ -101,7 +99,7 @@ function footer(head: Point) {
  * Filled shapes as back-and-forth rows. Each row runs from its first to its last burn,
  * plus a laser-off run-up at both ends so the head burns at full speed only.
  */
-function bitmap(text: Polyline[], frame: Polyline[], offset: Point, power: number, speed: number) {
+function bitmap(text: Polyline[], frame: Polyline[], offset: Point, power: number, speed: number, lineSpacing: number) {
   const box = bounds([...text, ...frame])
   if (!box) return []
   const s = sValue(power)
@@ -219,9 +217,49 @@ export function generateJob(input: JobInput) {
 
   return [
     ...header(head, input.date ?? new Date()),
-    ...bitmap(text, frame, position, settings.engrave.power, settings.engrave.speed),
+    ...bitmap(text, frame, position, settings.engrave.power, settings.engrave.speed, settings.lineSpacing),
     ...vector(patternLines, position, settings.pattern.power, settings.pattern.speed, 'M4', engraveAir),
     ...vector(cut.length ? [...holeLines, outline] : [], position, settings.cut.power, settings.cut.speed, 'M3', cutAir),
+    ...footer(head),
+  ].join('\n')
+}
+export interface FrameJobInput {
+  position: Point
+  width: number
+  height: number
+  /** current head position; the job starts and ends here */
+  head: Point
+  date?: Date
+}
+
+/** Traces the label bounds at its machine coordinates with the laser off. */
+export function generateFrameJob(input: FrameJobInput) {
+  const { position, width, height, head } = input
+  const corners = [
+    { x: position.x, y: position.y },
+    { x: position.x + width, y: position.y },
+    { x: position.x + width, y: position.y + height },
+    { x: position.x, y: position.y + height },
+  ]
+  const point = ({ x, y }: Point) => `X${fixed(x)}Y${fixed(y)}`
+  const frameHeader = header(head, input.date ?? new Date()).map((line) => ({
+    'M109 S1': 'M109 S0',
+    'M7S1': 'M7S0',
+    'M96 S0': 'M96 S1',
+  }[line] ?? line))
+  return [
+    ...frameHeader,
+    '# VECTOR START',
+    'G90',
+    'M4',
+    '# blockConfig={"powerFactor": 0, "isVector": true}',
+    `G0${point(corners[0]!)}`,
+    'G0Z30.000',
+    `G0${point(corners[0]!)}`,
+    `G1${point(corners[1]!)}S0F9600`,
+    `G1${point(corners[2]!)}`,
+    `G1${point(corners[3]!)}`,
+    `G1${point(corners[0]!)}`,
     ...footer(head),
   ].join('\n')
 }

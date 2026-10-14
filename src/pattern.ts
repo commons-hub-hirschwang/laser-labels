@@ -26,6 +26,8 @@ export interface PatternInput {
   height: number
   /** area the pattern may fill */
   region: { x1: number; y1: number; x2: number; y2: number }
+  /** corner radius of the region, concentric with the label's rounded outline */
+  regionRadius: number
   /** SVG path data of the text */
   textPath: string
   holes: { x: number; y: number; r: number }[]
@@ -69,7 +71,9 @@ function freeMask(input: PatternInput, resolution: number) {
   context.scale(1 / resolution, 1 / resolution)
 
   const { x1, y1, x2, y2 } = input.region
-  context.fillRect(x1, y1, x2 - x1, y2 - y1)
+  context.beginPath()
+  context.roundRect(x1, y1, x2 - x1, y2 - y1, input.regionRadius)
+  context.fill()
 
   context.globalCompositeOperation = 'destination-out'
   const text = new Path2D(input.textPath)

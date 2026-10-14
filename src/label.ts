@@ -8,6 +8,7 @@ import { qrModules } from './qr'
 
 export type HoleMode = 'none' | 'top' | 'sides' | 'corners'
 export type HoleAlign = 'top' | 'middle'
+export type HoleSide = 'top' | 'right' | 'bottom' | 'left'
 export type QrPosition = 'none' | 'left' | 'right' | 'top' | 'bottom'
 
 export interface LabelOptions {
@@ -17,6 +18,8 @@ export interface LabelOptions {
   /** space around the text, relative to the letter height */
   padding: number
   holes: HoleMode
+  /** side for the single hole */
+  holeSide: HoleSide
   /** only used for holes === 'sides' */
   holeAlign: HoleAlign
   holeDiameter: number
@@ -50,7 +53,6 @@ export interface Label {
   qrError?: string
 }
 
-const cornerRadius = 1.5 // without frame; with frame the corners are concentric with the frame's outer corners
 const edgeMargin = 1.5 // between label edge, frame, holes and text
 const frameWidth = 2
 // distance of the frame's centre line from the label edge, fixed so holes don't change it
@@ -225,7 +227,7 @@ export function layoutLabel(options: LabelOptions): Label {
     inset.left = inset.right = inset.top = inset.bottom = value
   } else {
     const holeZone = c + r + edgeMargin
-    if (options.holes === 'top') inset.top = holeZone
+    if (options.holes === 'top') inset[options.holeSide] = holeZone
     if (options.holes === 'sides' || options.holes === 'corners') inset.left = inset.right = holeZone
   }
 
@@ -260,11 +262,11 @@ export function layoutLabel(options: LabelOptions): Label {
   }
 
   let framePath = ''
-  let outlineRadius = cornerRadius
+  // the cut line is rounded around the frame's corners, also when there is no frame
+  const outlineRadius = Math.min(frameInner, width / 2, height / 2)
   if (options.frame) {
     // square inner corners; the outer edge and the label's cut line are rounded around them
     const outer = frameOuter
-    outlineRadius = frameInner
     framePath = roundedRect(outer, outer, width - 2 * outer, height - 2 * outer, frameWidth) +
       roundedRect(frameInner, frameInner, width - 2 * frameInner, height - 2 * frameInner, 0)
     if (options.innerLine) {
@@ -278,9 +280,15 @@ export function layoutLabel(options: LabelOptions): Label {
     }
   }
 
+  const singleHole = {
+    top: { x: width / 2, y: c },
+    right: { x: width - c, y: height / 2 },
+    bottom: { x: width / 2, y: height - c },
+    left: { x: c, y: height / 2 },
+  }[options.holeSide]
   const holeList = {
     none: [],
-    top: [{ x: width / 2, y: c }],
+    top: [singleHole],
     sides: [
       { x: c, y: options.holeAlign === 'top' ? c : height / 2 },
       { x: width - c, y: options.holeAlign === 'top' ? c : height / 2 },
@@ -299,6 +307,8 @@ export function layoutLabel(options: LabelOptions): Label {
       width,
       height,
       region: { x1: regionInset, y1: regionInset, x2: width - regionInset, y2: height - regionInset },
+      // inside a frame the corners are square
+      regionRadius: options.frame ? 0 : Math.max(0, outlineRadius - regionInset),
       textPath,
       holes: holeList,
       keepOut: qrBox

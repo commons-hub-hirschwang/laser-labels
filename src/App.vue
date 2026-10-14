@@ -9,6 +9,7 @@ const defaults: LabelOptions = {
   textSize: 10,
   padding: 1,
   holes: 'sides',
+  holeSide: 'top',
   holeAlign: 'middle',
   holeDiameter: 4,
   frame: false,
@@ -117,9 +118,15 @@ const minModuleSize = 0.5
 
 const holeModes = [
   { value: 'none', label: 'None' },
-  { value: 'top', label: '1 · top' },
+  { value: 'top', label: '1 · hole' },
   { value: 'sides', label: '2 · sides' },
   { value: 'corners', label: '4 · corners' },
+] as const
+const holeSides = [
+  { value: 'top', label: 'Top center' },
+  { value: 'right', label: 'Right middle' },
+  { value: 'bottom', label: 'Bottom center' },
+  { value: 'left', label: 'Left middle' },
 ] as const
 
 /** finishes growing right away instead of waiting for the animation */
@@ -163,6 +170,7 @@ async function share() {
       <h1>Commons Hub Labels</h1>
       <button type="button" class="secondary" @click="resetOptions">Reset to defaults</button>
     </header>
+    <p class="tagline">Opinionated workflow to make generating consistently styled labels as easy as typing a word.</p>
 
     <section class="preview">
       <svg
@@ -189,7 +197,7 @@ async function share() {
       <p v-if="label" class="dimensions">{{ label.width.toFixed(1) }} × {{ label.height.toFixed(1) }} mm</p>
     </section>
 
-    <form @submit.prevent>
+    <form class="label-options" @submit.prevent>
       <label>
         Text
         <textarea v-model="options.text" rows="3" />
@@ -205,15 +213,19 @@ async function share() {
         <input v-model.number="options.padding" type="range" min="0.2" max="3" step="0.1" />
       </label>
 
-      <label class="choice">
-        <input v-model="options.frame" type="checkbox" />
-        Engraved frame
-      </label>
-
-      <label v-if="options.frame" class="choice">
-        <input v-model="options.innerLine" type="checkbox" />
-        Thin inner line
-      </label>
+      <fieldset class="frame-group">
+        <legend>Frame</legend>
+        <div class="choices">
+          <label class="choice">
+            <input v-model="options.frame" type="checkbox" />
+            Engraved frame
+          </label>
+        </div>
+        <label v-if="options.frame" class="choice frame-subsetting">
+          <input v-model="options.innerLine" type="checkbox" />
+          Thin inner line
+        </label>
+      </fieldset>
 
       <fieldset>
         <legend>Background pattern</legend>
@@ -228,7 +240,7 @@ async function share() {
         </div>
       </fieldset>
 
-      <fieldset>
+      <fieldset class="qr-group">
         <legend>QR code</legend>
         <div class="choices">
           <label v-for="position in qrPositions" :key="position.value" class="choice">
@@ -236,58 +248,69 @@ async function share() {
             {{ position.label }}
           </label>
         </div>
+        <div v-if="options.qrPosition !== 'none'" class="qr-subsettings">
+          <label>
+            QR content
+            <input v-model="options.qrContent" type="url" placeholder="https://…" />
+          </label>
+          <p v-if="!hasText" class="muted">No text: the label holds only the QR code.</p>
+
+          <label>
+            QR size: {{ options.qrSize }} mm
+            <input v-model.number="options.qrSize" type="range" min="10" max="60" step="1" />
+          </label>
+          <p v-if="label?.qrError" class="warning">{{ label.qrError }}</p>
+          <p v-else-if="label?.qr && label.qr.moduleSize < minModuleSize" class="warning">
+            The QR dots are only {{ label.qr.moduleSize.toFixed(2) }} mm; phones may not read them on wood. Make the QR
+            code bigger or the content shorter.
+          </p>
+        </div>
       </fieldset>
 
-      <template v-if="options.qrPosition !== 'none'">
-        <label>
-          QR content
-          <input v-model="options.qrContent" type="url" placeholder="https://…" />
-        </label>
-        <p v-if="!hasText" class="muted">No text: the label holds only the QR code.</p>
-
-        <label>
-          QR size: {{ options.qrSize }} mm
-          <input v-model.number="options.qrSize" type="range" min="10" max="60" step="1" />
-        </label>
-        <p v-if="label?.qrError" class="warning">{{ label.qrError }}</p>
-        <p v-else-if="label?.qr && label.qr.moduleSize < minModuleSize" class="warning">
-          The QR dots are only {{ label.qr.moduleSize.toFixed(2) }} mm; phones may not read them on wood. Make the QR
-          code bigger or the content shorter.
-        </p>
-      </template>
-
-      <fieldset>
+      <fieldset class="hole-group">
         <legend>Holes</legend>
-        <label v-for="mode in holeModes" :key="mode.value" class="choice">
-          <input v-model="options.holes" type="radio" :value="mode.value" />
-          {{ mode.label }}
+        <div class="choices">
+          <label v-for="mode in holeModes" :key="mode.value" class="choice">
+            <input v-model="options.holes" type="radio" :value="mode.value" />
+            {{ mode.label }}
+          </label>
+        </div>
+
+        <fieldset v-if="options.holes === 'top'" class="hole-subsetting">
+          <legend>Hole position</legend>
+          <div class="choices">
+            <label v-for="side in holeSides" :key="side.value" class="choice">
+              <input v-model="options.holeSide" type="radio" :value="side.value" />
+              {{ side.label }}
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset v-if="options.holes === 'sides'" class="hole-subsetting">
+          <legend>Hole position</legend>
+          <div class="choices">
+            <label class="choice"><input v-model="options.holeAlign" type="radio" value="top" /> Top</label>
+            <label class="choice"><input v-model="options.holeAlign" type="radio" value="middle" /> Middle</label>
+          </div>
+        </fieldset>
+
+        <label v-if="options.holes !== 'none'" class="hole-subsetting">
+          Hole diameter: {{ options.holeDiameter }} mm
+          <input v-model.number="options.holeDiameter" type="range" min="2" max="10" step="0.5" />
         </label>
       </fieldset>
-
-      <fieldset v-if="options.holes === 'sides'">
-        <legend>Hole position</legend>
-        <label class="choice"><input v-model="options.holeAlign" type="radio" value="top" /> Top</label>
-        <label class="choice"><input v-model="options.holeAlign" type="radio" value="middle" /> Middle</label>
-      </fieldset>
-
-      <label v-if="options.holes !== 'none'">
-        Hole diameter: {{ options.holeDiameter }} mm
-        <input v-model.number="options.holeDiameter" type="range" min="2" max="10" step="0.5" />
-      </label>
 
       <div class="actions">
-        <button type="button" :disabled="!label" @click="download">Download SVG</button>
         <button v-if="canShare" type="button" :disabled="!label" @click="share">Share…</button>
       </div>
     </form>
 
-    <LaserPanel v-if="label" :label="label" :text="options.text" :finish-pattern="finishPattern" />
-
-    <aside>
-      Without the S1 on USB, or for other materials, download the SVG. In xTool Studio / XCS: set the <strong class="cut">red layer</strong> to <em>Cut</em> and the
-      <strong>black layer</strong> to <em>Engrave</em>. The <strong class="score">blue layer</strong> is the
-      pattern: give it a lighter setting, e.g. <em>Score</em> with low power. Process engraving and pattern before
-      cutting.
-    </aside>
+    <LaserPanel
+      v-if="label"
+      :label="label"
+      :text="options.text"
+      :finish-pattern="finishPattern"
+      :download-svg="download"
+    />
   </main>
 </template>

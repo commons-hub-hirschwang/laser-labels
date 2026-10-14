@@ -63,8 +63,22 @@ main {
   }
 }
 
+.tagline {
+  margin: -1rem 0 0;
+  color: var(--muted);
+}
+
 .muted {
   color: var(--muted);
+}
+
+.machine-note {
+  margin: 0;
+  color: var(--text);
+
+  & strong {
+    color: #ff5533;
+  }
 }
 
 .warning {
@@ -76,22 +90,19 @@ main {
 
 button {
   font: inherit;
-  padding: 0.5rem 1rem;
-  border: none;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--accent);
   border-radius: 0.25rem;
-  background: var(--accent);
-  color: #fff;
+  background: none;
+  color: var(--accent);
   cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: rgba(255, 85, 51, 0.3);
+  }
 
   &:disabled {
     opacity: 0.5;
-  }
-
-  &.secondary {
-    padding: 0.25rem 0.75rem;
-    background: none;
-    border: 1px solid var(--accent);
-    color: var(--accent);
   }
 }
 
@@ -166,8 +177,18 @@ form {
 
     &.choice {
       display: inline-flex;
-      align-items: center;
+      align-items: flex-start;
       margin-right: 1rem;
+
+      & input[type='checkbox'],
+      & input[type='radio'] {
+        flex: none;
+        margin: 0 0.5rem 0 0;
+      }
+
+      & input[type='checkbox'] {
+        margin-top: 0.35em;
+      }
     }
   }
 
@@ -211,6 +232,80 @@ form {
     padding: 0.25rem 0.5rem;
     margin: 0 0.25rem;
   }
+
+  & .position-controls {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-left: 0.75%;
+
+    & label {
+      display: inline-flex;
+      align-items: center;
+      flex: none;
+      gap: 0.35rem;
+      white-space: nowrap;
+    }
+
+    & input[type='number'] {
+      width: 6.5rem;
+      margin: 0;
+      padding: 0.25rem;
+      text-align: right;
+    }
+  }
+}
+
+.label-options {
+  & > fieldset {
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.35rem;
+    background: var(--surface);
+
+    & legend {
+      font-weight: 600;
+    }
+
+    & .choice {
+      color: var(--muted);
+    }
+  }
+
+  & .hole-subsetting {
+    margin: 0.75rem 0 0 0.75rem;
+    padding: 0 0 0 0.75rem;
+    border-left: 1px solid var(--border);
+
+    & legend {
+      color: var(--text);
+      font-size: inherit;
+      font-weight: 400;
+    }
+
+    & .choice {
+      color: var(--muted);
+    }
+  }
+
+  & .frame-subsetting {
+    margin: 0.75rem 0 0 0.75rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  & .qr-subsettings {
+    display: grid;
+    gap: 0.75rem;
+    margin: 0.75rem 0 0 0.75rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid var(--border);
+
+    & p {
+      margin: 0;
+    }
+  }
 }
 
 .laser {
@@ -238,8 +333,17 @@ form {
       fill: var(--border);
       cursor: pointer;
 
-      &:hover {
+      &:hover,
+      &.armed {
         fill: var(--cut);
+      }
+
+      & .cross {
+        stroke: var(--text);
+        stroke-width: 1;
+        stroke-dasharray: 100;
+        stroke-dashoffset: 100;
+        animation: delete-cross-in 0.12s ease-out forwards;
       }
     }
 
@@ -261,9 +365,185 @@ form {
     }
   }
 
+  & .bed-map-wrapper {
+    position: relative;
+  }
+
+  & .clear-board {
+    position: absolute;
+    z-index: 2;
+    width: max-content;
+    transition: top 0.3s ease, left 0.3s ease, transform 0.3s ease;
+
+    &.at-top-left {
+      top: 0.5rem;
+      left: 0.5rem;
+      transform: none;
+    }
+
+    &.at-top-right {
+      top: 0.5rem;
+      left: calc(100% - 0.5rem);
+      transform: translateX(-100%);
+    }
+
+    &.at-bottom-left {
+      top: calc(100% - 0.5rem);
+      left: 0.5rem;
+      transform: translateY(-100%);
+    }
+
+    &.at-bottom-right {
+      top: calc(100% - 0.5rem);
+      left: calc(100% - 0.5rem);
+      transform: translate(-100%, -100%);
+    }
+  }
+
   & .status {
     font-weight: 600;
   }
+
+  & .connect-button {
+    padding: 0.25rem 0.5rem;
+  }
+
+  & .machine-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) max-content;
+    column-gap: 0.25rem;
+    row-gap: 0;
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    background: var(--bg);
+  }
+
+  & .machine-control-row {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    align-items: start;
+    gap: 0.5rem 1rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid var(--border);
+
+    & .control-label {
+      color: var(--muted);
+    }
+
+    & .choice {
+      margin: 0;
+    }
+
+    & .inactive {
+      color: var(--muted);
+    }
+
+    & .corner-actions {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(max-content, 1fr));
+
+      & .frame-button {
+        grid-column: 1 / -1;
+      }
+    }
+  }
+
+  & .send-row {
+    border-bottom: 0;
+
+    & > button {
+      align-self: end;
+    }
+
+    & .send-hint {
+      margin: 0;
+      color: var(--muted);
+    }
+  }
+
+  & .machine-feedback {
+    grid-column: 1 / -1;
+  }
+
+  & .machine-feedback {
+    display: flex;
+    align-items: center;
+    padding-top: 0.25rem;
+
+    & p {
+      margin: 0;
+    }
+  }
+
+  & .settings-override {
+    margin: 0.25rem 0;
+
+    & summary {
+      width: fit-content;
+      color: var(--muted);
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    & .settings-guidance {
+      margin: 0.5rem 0;
+      color: var(--muted);
+    }
+
+    & > .actions {
+      margin-top: 0.75rem;
+    }
+  }
+
+  & .settings-warning {
+    margin: 0;
+    font-size: 0.9rem;
+  }
+
+  & .downloads {
+    margin-top: 0.5rem;
+
+    & summary {
+      width: fit-content;
+      color: var(--muted);
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    & .actions {
+      margin-top: 0.5rem;
+    }
+
+    & .download-guide {
+      margin: 0.75rem 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+  }
+}
+
+@keyframes delete-cross-in {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .laser .position-controls input[type='number'] {
+    width: 5rem;
+  }
+
+  .laser .machine-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .laser .machine-control-row {
+    grid-template-columns: subgrid;
+  }
+
 }
 
 aside {

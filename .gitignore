@@ -28,3 +28,10 @@ temp
 
 # USB captures of xTool Studio jobs (they also contain keyboard input)
 reference-files
+
+# Dependency lockfiles
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+bun.lock
+bun.lockb
