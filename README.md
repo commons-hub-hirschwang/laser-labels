@@ -1,5 +1,24 @@
-# Vue 3 + TypeScript + Vite
+# Label Cutter
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+An opinionated workflow for making consistently styled labels with a 40W xTool S1.
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+## Development
+
+Install dependencies and start the local app:
+
+```sh
+pnpm install
+pnpm run dev
+```
+
+Create a production build with:
+
+```sh
+pnpm run build
+```
+
+Vite writes the production files to `dist/`.
+
+## Deployment
+
+Cloudflare Pages is expected to build this project from its connected Git repository. For a Vite project, use `pnpm run build` as the build command and `dist` as the output directory. Deployments are managed by the Cloudflare Pages project settings; this repository does not use a Wrangler deployment script.
