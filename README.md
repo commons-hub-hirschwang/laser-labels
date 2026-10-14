@@ -36,4 +36,10 @@ The original captures are kept locally in `reference-files/` and excluded from G
 
 ## Deployment
 
-Cloudflare Pages is expected to build this project from its connected Git repository. For a Vite project, use `pnpm run build` as the build command and `dist` as the output directory. Deployments are managed by the Cloudflare Pages project settings; this repository does not use a Wrangler deployment script.
+The app is a static-assets Cloudflare Worker, `commons-hub-laser-labels`, configured in `wrangler.jsonc` and served at https://commons-hub-laser-labels.niemeyer-felix.workers.dev.
+
+Workers Builds deploys every push to `main` (build command `pnpm run build`, deploy command `npx wrangler deploy`). To deploy by hand:
+
+```sh
+pnpm run deploy
+```
