@@ -352,7 +352,7 @@ function download(filename: string, gcode: string) {
 
 <template>
   <form class="laser" @submit.prevent>
-    <h2>xTool S1</h2>
+    <h2>Laser Cutting</h2>
     <p class="machine-note">Designed for the <strong>40W xTool S1</strong>, with defaults tuned for <strong>{{ material }}</strong>.</p>
 
     <details class="settings-override">
@@ -446,7 +446,7 @@ function download(filename: string, gcode: string) {
 
     <p v-if="serialMissing" class="warning">{{ serialMissing }} You can still download the SVG or the G-code.</p>
     <template v-else>
-      <section class="machine-controls" aria-label="S1 controls">
+      <section class="machine-controls" aria-label="Laser cutter controls">
         <div class="machine-control-row connection-row">
           <span class="status">{{ s1 ? stateText : 'Not connected' }}</span>
           <button v-if="!s1" type="button" class="connect-button" @click="connect">
@@ -479,7 +479,7 @@ function download(filename: string, gcode: string) {
           <p v-else class="warning settings-warning" aria-live="polite">
             Defaults have been overwritten. These settings may not be tuned for {{ material }}.
           </p>
-          <button type="button" :disabled="!canSend" @click="send">Send print job to S1</button>
+          <button type="button" :disabled="!canSend" @click="send">Send job to laser cutter</button>
         </div>
 
         <div v-if="waitingForButton || error" class="machine-feedback" aria-live="polite">
