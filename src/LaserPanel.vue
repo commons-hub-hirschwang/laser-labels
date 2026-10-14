@@ -50,8 +50,6 @@ const layers = [
 const settingsChanged = computed(() => layers.some(({ key }) =>
   settings[key].power !== plywoodSettings[key].power || settings[key].speed !== plywoodSettings[key].speed) ||
   settings.lineSpacing !== plywoodSettings.lineSpacing)
-const plywoodConfirmed = ref(false)
-watch(settingsChanged, () => (plywoodConfirmed.value = false))
 
 // label position on the bed (top-left corner)
 const position = reactive<Point>(load('laser-position', { x: 3.7, y: 229 }))
@@ -95,6 +93,7 @@ const overlaps = computed(() => history.value.some((cut) =>
 
 // dragging the label on the bed map
 const bedMap = ref<SVGSVGElement>()
+const snapGuides = ref<{ x?: number; y?: number }>({})
 let dragStart: { pointer: Point; position: Point } | undefined
 function bedPoint(event: PointerEvent): Point {
   const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(bedMap.value!.getScreenCTM()!.inverse())
@@ -111,7 +110,12 @@ function drag(event: PointerEvent) {
     x: dragStart.position.x + point.x - dragStart.pointer.x,
     y: dragStart.position.y + point.y - dragStart.pointer.y,
   }
-  Object.assign(position, constrained(event.shiftKey ? next : snap(next)))
+  if (event.shiftKey) {
+    snapGuides.value = {}
+    Object.assign(position, constrained(next))
+  } else {
+    Object.assign(position, constrained(snap(next)))
+  }
 }
 
 function constrained(point: Point): Point {
@@ -175,11 +179,14 @@ function snap(raw: Point): Point {
   const { width, height } = props.label
   const result = { ...raw }
   const best = { x: snapDistance, y: snapDistance }
+  const snapped = { x: false, y: false }
+  let linked: { distance: number; point: Point; guides: { x: number; y: number } } | undefined
   const consider = (axis: 'x' | 'y', candidate: number) => {
     const distance = Math.abs(candidate - raw[axis])
     if (distance < best[axis]) {
       best[axis] = distance
       result[axis] = candidate
+      snapped[axis] = true
     }
   }
   consider('x', snapGap)
@@ -187,6 +194,26 @@ function snap(raw: Point): Point {
   consider('y', snapGap)
   consider('y', bed.height - snapGap - height)
   for (const cut of history.value) {
+    const corners = [
+      { x: cut.x, y: cut.y },
+      { x: cut.x + cut.width - width, y: cut.y },
+      { x: cut.x, y: cut.y + cut.height - height },
+      { x: cut.x + cut.width - width, y: cut.y + cut.height - height },
+    ]
+    for (const corner of corners) {
+      const distance = Math.hypot(corner.x - raw.x, corner.y - raw.y)
+      if (distance < snapDistance && (!linked || distance < linked.distance)) {
+        linked = {
+          distance,
+          point: corner,
+          guides: {
+            x: corner.x === cut.x ? cut.x : cut.x + cut.width,
+            y: corner.y === cut.y ? cut.y : cut.y + cut.height,
+          },
+        }
+      }
+    }
+
     // beside a label only when level with it
     if (raw.y < cut.y + cut.height + snapGap && cut.y < raw.y + height + snapGap) {
       consider('x', cut.x + cut.width + snapGap)
@@ -201,12 +228,45 @@ function snap(raw: Point): Point {
     consider('y', cut.y)
     consider('y', cut.y + cut.height - height)
   }
+  if (linked) {
+    snapGuides.value = linked.guides
+    return linked.point
+  }
+
+  const guides: { x?: number; y?: number } = {}
+  if (snapped.x) {
+    for (const cut of history.value) {
+      if (Math.abs(result.x - cut.x) < 0.01 || Math.abs(result.x + width + snapGap - cut.x) < 0.01) guides.x ??= cut.x
+      if (Math.abs(result.x + width - cut.x - cut.width) < 0.01 || Math.abs(result.x - cut.x - cut.width - snapGap) < 0.01) {
+        guides.x ??= cut.x + cut.width
+      }
+    }
+    if (guides.x === undefined) {
+      guides.x = Math.abs(result.x - snapGap) < 0.01 ? result.x : result.x + width
+    }
+  }
+  if (snapped.y) {
+    for (const cut of history.value) {
+      if (Math.abs(result.y - cut.y) < 0.01 || Math.abs(result.y + height + snapGap - cut.y) < 0.01) guides.y ??= cut.y
+      if (Math.abs(result.y + height - cut.y - cut.height) < 0.01 || Math.abs(result.y - cut.y - cut.height - snapGap) < 0.01) {
+        guides.y ??= cut.y + cut.height
+      }
+    }
+    if (guides.y === undefined) {
+      guides.y = Math.abs(result.y - snapGap) < 0.01 ? result.y : result.y + height
+    }
+  }
+  snapGuides.value = guides
   return result
 }
-const endDrag = () => (dragStart = undefined)
+const endDrag = () => {
+  dragStart = undefined
+  snapGuides.value = {}
+}
 
 // machine
 const s1 = ref<S1>()
+const connecting = ref(false)
 const state = ref<number>()
 const head = ref<Point>()
 const crossOffset = ref<Point>({ x: 0, y: 0 })
@@ -226,6 +286,8 @@ const stateText = computed(() => {
 })
 
 async function connect() {
+  if (connecting.value || s1.value) return
+  connecting.value = true
   error.value = ''
   try {
     const machine = await S1.connect()
@@ -242,6 +304,9 @@ async function connect() {
       }
     }
     machine.onPosition = (value) => (head.value = value)
+    machine.onError = () => {
+      error.value = 'USB connection lost. Reconnect the S1, then connect again.'
+    }
     machine.onClose = () => {
       s1.value = undefined
       state.value = undefined
@@ -253,6 +318,8 @@ async function connect() {
     state.value = await machine.state()
   } catch (reason) {
     if ((reason as Error).name !== 'NotFoundError') error.value = (reason as Error).message // NotFoundError: dialog closed
+  } finally {
+    connecting.value = false
   }
 }
 onBeforeUnmount(() => void s1.value?.close())
@@ -288,6 +355,7 @@ async function frameLabel() {
       position,
       width: props.label.width,
       height: props.label.height,
+      crossOffset: crossOffset.value,
       head: headPosition,
     }))
     if (!uploaded) activeJob.value = undefined
@@ -310,7 +378,7 @@ function job() {
 }
 
 const canSend = computed(() => s1.value && positionFitsBed.value &&
-  (settingsChanged.value || plywoodConfirmed.value) && state.value === 3 && progress.value === undefined)
+  state.value === 3 && progress.value === undefined)
 
 async function send() {
   error.value = ''
@@ -318,7 +386,6 @@ async function send() {
   activeJob.value = 'label'
   if (await uploadJob(job())) {
     sent = { text: props.text.trim().split('\n')[0]!, cutPath, x: position.x, y: position.y, width, height, date: new Date().toISOString() }
-    plywoodConfirmed.value = false // asked again for every label
   } else activeJob.value = undefined
 }
 
@@ -421,6 +488,22 @@ function download(filename: string, gcode: string) {
             :transform="`translate(${position.x} ${position.y})`"
             @pointerdown="startDrag"
           />
+          <line
+            v-if="snapGuides.x !== undefined"
+            class="snap-guide"
+            :x1="snapGuides.x"
+            y1="0"
+            :x2="snapGuides.x"
+            :y2="bed.height"
+          />
+          <line
+            v-if="snapGuides.y !== undefined"
+            class="snap-guide"
+            x1="0"
+            :y1="snapGuides.y"
+            :x2="bed.width"
+            :y2="snapGuides.y"
+          />
           <g v-if="head" class="head" :transform="`translate(${head.x + crossOffset.x} ${head.y + crossOffset.y})`">
             <title>Red cross</title>
             <path d="M-6 0H6M0 -6V6" />
@@ -435,7 +518,7 @@ function download(filename: string, gcode: string) {
         >Clear board</button>
       </div>
       <div class="position-controls">
-        <label><span>x =</span><input :value="position.x.toFixed(2)" type="number" min="0" :max="Math.max(0, bed.width - label.width)" step="0.01" @change="setPosition('x', $event)" /><span>mm,</span></label>
+        <label><span>x =</span><input :value="position.x.toFixed(2)" type="number" min="0" :max="Math.max(0, bed.width - label.width)" step="0.01" @change="setPosition('x', $event)" /><span>,</span></label>
         <label><span>y =</span><input :value="position.y.toFixed(2)" type="number" min="0" :max="Math.max(0, bed.height - label.height)" step="0.01" @change="setPosition('y', $event)" /><span>mm</span></label>
       </div>
       <p v-if="!positionFitsBed" class="warning">
@@ -448,15 +531,15 @@ function download(filename: string, gcode: string) {
     <template v-else>
       <section class="machine-controls" aria-label="Laser cutter controls">
         <div class="machine-control-row connection-row">
-          <span class="status">{{ s1 ? stateText : 'Not connected' }}</span>
-          <button v-if="!s1" type="button" class="connect-button" @click="connect">
-            Connect to xTool S1<br />laser cutter (USB)
+          <button v-if="!s1" type="button" class="connect-button" :disabled="connecting" @click="connect">
+            {{ connecting ? 'Connecting…' : 'Connect to xTool S1' }}<br />laser cutter (USB)
           </button>
           <button v-else type="button" class="secondary" @click="s1.close()">Disconnect</button>
+          <p v-if="error" class="connection-error" aria-live="polite">{{ error }}</p>
+          <span v-else class="status">{{ s1 ? stateText : 'Not connected' }}</span>
         </div>
 
-        <div class="machine-control-row">
-          <span class="control-label">Framing</span>
+        <div class="machine-control-row framing-row">
           <div class="actions corner-actions">
             <button
               v-for="corner in corners"
@@ -469,22 +552,17 @@ function download(filename: string, gcode: string) {
             >{{ corner.symbol }}</button>
             <button type="button" class="secondary frame-button" :disabled="!canFrame" @click="frameLabel">Frame label</button>
           </div>
+          <span class="control-label">Framing</span>
         </div>
 
         <div class="machine-control-row send-row">
-          <label v-if="!settingsChanged" class="choice send-hint" :class="{ inactive: !s1 }">
-            <input v-model="plywoodConfirmed" type="checkbox" :disabled="!s1" />
-            3 mm plywood
-          </label>
-          <p v-else class="warning settings-warning" aria-live="polite">
-            Defaults have been overwritten. These settings may not be tuned for {{ material }}.
-          </p>
           <button type="button" :disabled="!canSend" @click="send">Send job to laser cutter</button>
-        </div>
-
-        <div v-if="waitingForButton || error" class="machine-feedback" aria-live="polite">
-          <p v-if="waitingForButton" class="warning">Job sent. <strong>Press the front button on the S1 to start it.</strong></p>
-          <p v-else-if="error" class="warning">{{ error }}</p>
+          <div class="send-status" aria-live="polite">
+            <p v-if="settingsChanged" class="warning settings-warning">
+              Defaults have been overwritten. These settings may not be tuned for {{ material }}.
+            </p>
+            <p v-if="waitingForButton" class="warning">Job sent. <strong>Press the front button on the S1 to start it.</strong></p>
+          </div>
         </div>
       </section>
     </template>

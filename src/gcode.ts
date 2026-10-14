@@ -40,6 +40,8 @@ function header(head: Point, date: Date) {
     `# date=${stamp}`,
     '# version=1.9.11',
     '# algorithmVersion=',
+    // XCS records the nominal 498×330 canvas; machine.ts separately limits label placement to
+    // the 498×319 usable area for the wider 40W head. These sizes share the same origin.
     '# gc={"size":{"w":498,"h":330}}',
     '# gc={"offset":{"x":0,"y":0}}',
     '# gc={"start":{"x":0,"y":0.0000}}',
@@ -227,6 +229,8 @@ export interface FrameJobInput {
   position: Point
   width: number
   height: number
+  /** red cross position relative to the laser head at framing height */
+  crossOffset: Point
   /** current head position; the job starts and ends here */
   head: Point
   date?: Date
@@ -234,12 +238,12 @@ export interface FrameJobInput {
 
 /** Traces the label bounds at its machine coordinates with the laser off. */
 export function generateFrameJob(input: FrameJobInput) {
-  const { position, width, height, head } = input
+  const { position, width, height, crossOffset, head } = input
   const corners = [
-    { x: position.x, y: position.y },
-    { x: position.x + width, y: position.y },
-    { x: position.x + width, y: position.y + height },
-    { x: position.x, y: position.y + height },
+    { x: position.x - crossOffset.x, y: position.y - crossOffset.y },
+    { x: position.x + width - crossOffset.x, y: position.y - crossOffset.y },
+    { x: position.x + width - crossOffset.x, y: position.y + height - crossOffset.y },
+    { x: position.x - crossOffset.x, y: position.y + height - crossOffset.y },
   ]
   const point = ({ x, y }: Point) => `X${fixed(x)}Y${fixed(y)}`
   const frameHeader = header(head, input.date ?? new Date()).map((line) => ({

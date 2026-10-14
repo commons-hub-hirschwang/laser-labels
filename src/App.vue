@@ -75,8 +75,15 @@ const coin = { diameter: 23.25, core: 16.25, gap: 6 }
 const previewBox = computed(() => {
   const l = label.value!
   const width = l.width + coin.gap + coin.diameter
-  const height = Math.max(l.height, coin.diameter)
-  return { width, height, labelY: (height - l.height) / 2, coinX: l.width + coin.gap + coin.diameter / 2 }
+  const contentHeight = Math.max(l.height, coin.diameter)
+  const referenceSpace = 12
+  return {
+    width,
+    height: contentHeight + referenceSpace,
+    labelY: referenceSpace + (contentHeight - l.height) / 2,
+    coinX: l.width + coin.gap + coin.diameter / 2,
+    coinY: referenceSpace + contentHeight / 2,
+  }
 })
 
 const fontsLoaded = ref(false)
@@ -170,7 +177,7 @@ async function share() {
       <h1>Commons Hub Labels</h1>
       <button type="button" class="secondary" @click="resetOptions">Reset to defaults</button>
     </header>
-    <p class="tagline">Opinionated workflow to make generating consistently styled labels as easy as typing a word.</p>
+        <p class="tagline">A simple way to laser-cut consistent labels.</p>
 
     <section class="preview">
       <svg
@@ -187,11 +194,12 @@ async function share() {
           <!-- holes are cut through everything, so they go on top -->
           <circle v-for="(hole, index) in label.holes" :key="index" class="hole" :cx="hole.x" :cy="hole.y" :r="hole.r" />
         </g>
-        <g class="coin" :transform="`translate(${previewBox.coinX} ${previewBox.height / 2})`">
+        <g class="coin" :transform="`translate(${previewBox.coinX} ${previewBox.coinY})`">
           <title>1 € coin for scale</title>
           <circle class="ring" :r="coin.diameter / 2" />
           <circle class="core" :r="coin.core / 2" />
-          <text dy="0.35em">1 €</text>
+          <text class="coin-label"><tspan x="0" y="-1.5">1 €</tspan><tspan x="0" y="2.5">coin</tspan></text>
+          <text class="reference" y="-16.5"><tspan x="0">size</tspan><tspan x="0" dy="3.5">reference</tspan></text>
         </g>
       </svg>
       <p v-if="label" class="dimensions">{{ label.width.toFixed(1) }} × {{ label.height.toFixed(1) }} mm</p>
@@ -204,7 +212,7 @@ async function share() {
       </label>
 
       <label v-if="!qrOnly">
-        Letter height: {{ options.textSize }} mm
+        Text height: {{ options.textSize }} mm
         <input v-model.number="textSizeSlider" type="range" min="0" max="1" step="0.001" />
       </label>
 

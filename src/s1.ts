@@ -56,6 +56,7 @@ export class S1 {
   /** M222 state, pushed by the S1 and answered on request */
   onState: (state: number) => void = () => {}
   onPosition: (position: Point) => void = () => {}
+  onError: (error: Error) => void = () => {}
   onClose: () => void = () => {}
 
   private writer: WritableStreamDefaultWriter<Uint8Array>
@@ -79,28 +80,28 @@ export class S1 {
     const port = await navigator.serial.requestPort({ filters: [usbFilter] })
     // CDC serial ignores the baud rate, Web Serial still needs one
     await port.open({ baudRate: 115200 })
-    const s1 = new S1(port)
-    const name = await s1.command('M100')
-    if (!name.includes('xTool S1')) {
-      await s1.close()
-      throw new Error(`Not an xTool S1: ${name}`)
+    let s1: S1 | undefined
+    try {
+      s1 = new S1(port)
+      const name = await s1.command('M100')
+      if (!name.includes('xTool S1')) throw new Error(`Not an xTool S1: ${name}`)
+      // Studio sets this right after connecting
+      await s1.command('M97 S0\nM96 S1')
+      return s1
+    } catch (error) {
+      if (s1) await s1.close()
+      else await port.close().catch(() => {})
+      throw error
     }
-    // Studio sets this right after connecting
-    await s1.command('M97 S0\nM96 S1')
-    return s1
   }
 
   async close() {
     if (this.closed) return
     this.closed = true
     window.clearInterval(this.polling)
-    try {
-      await this.reader?.cancel()
-      this.writer.releaseLock()
-      await this.port.close()
-    } catch {
-      // already gone
-    }
+    await this.reader?.cancel().catch(() => {})
+    try { this.writer.releaseLock() } catch { /* already released */ }
+    await this.port.close().catch(() => {})
     this.onClose()
   }
 
@@ -113,7 +114,10 @@ export class S1 {
         try {
           for (;;) {
             const { value, done } = await reader.read()
-            if (done) break
+            if (done) {
+              if (!this.closed) this.onError(new Error('The USB serial stream closed unexpectedly'))
+              break
+            }
             const joined = new Uint8Array(buffer.length + value.length)
             joined.set(buffer)
             joined.set(value, buffer.length)
@@ -143,8 +147,11 @@ export class S1 {
           reader.releaseLock()
         }
       }
-    } catch {
-      // unplugged
+    } catch (reason) {
+      if (!this.closed) {
+        const error = reason instanceof Error ? reason : new Error(String(reason))
+        this.onError(error)
+      }
     }
     void this.close()
   }
