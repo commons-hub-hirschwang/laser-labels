@@ -282,7 +282,9 @@ form {
     }
   }
 
-  & .hole-subsetting {
+  & .subsetting {
+    display: grid;
+    gap: 0.75rem;
     margin: 0.75rem 0 0 0.75rem;
     padding: 0 0 0 0.75rem;
     border-left: 1px solid var(--border);
@@ -418,17 +420,13 @@ form {
     }
   }
 
-  & .status {
-    font-weight: 600;
-  }
-
   & .connect-button {
     padding: 0.25rem 0.5rem;
   }
 
   & .machine-controls {
     display: grid;
-    grid-template-columns: max-content minmax(0, 1fr);
+    grid-template-columns: max-content max-content minmax(0, 1fr);
     column-gap: 0.25rem;
     row-gap: 0;
   }
@@ -442,15 +440,10 @@ form {
     padding: 0.5rem 0;
     border-bottom: 1px solid var(--border);
 
-    & .control-label {
-      color: var(--muted);
-    }
-
-    & .choice {
-      margin: 0;
-    }
-
-    & .inactive {
+    & .step {
+      /* level with the button text */
+      padding-top: calc(0.25rem + 1px);
+      font-weight: 600;
       color: var(--muted);
     }
 
@@ -464,38 +457,28 @@ form {
     }
   }
 
-  & .connection-row,
-  & .framing-row {
-    & > .status,
-    & > .control-label,
-    & > .connection-error {
-      grid-column: 2;
-    }
-  }
-
-  & .connection-error {
-    margin: 0;
-    color: var(--muted);
-  }
-
-  & .send-row {
+  & .machine-control-row:last-child {
     border-bottom: 0;
+  }
 
-    & > button {
-      grid-column: 1;
-    }
+  /* the same in every step: what it does, its state, then warnings */
+  & .step-status {
+    min-width: 0;
 
-    & .send-status {
-      grid-column: 2;
-      min-width: 0;
-    }
-
-    & .send-status p {
+    & p {
       margin: 0;
     }
 
-    & .send-status p + p {
+    & p + p {
       margin-top: 0.25rem;
+    }
+
+    & .hint {
+      color: var(--muted);
+    }
+
+    & .status {
+      font-weight: 600;
     }
   }
 
@@ -517,11 +500,6 @@ form {
     & > .actions {
       margin-top: 0.75rem;
     }
-  }
-
-  & .settings-warning {
-    margin: 0;
-    font-size: 0.9rem;
   }
 
   & .downloads {

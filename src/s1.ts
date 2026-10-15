@@ -17,6 +17,11 @@ const uploadTimeout = 15000
 
 export const serialSupported = 'serial' in navigator
 
+export function isS1(port: SerialPort) {
+  const { usbVendorId, usbProductId } = port.getInfo()
+  return usbVendorId === usbFilter.usbVendorId && usbProductId === usbFilter.usbProductId
+}
+
 const byteSum = (bytes: ArrayLike<number>) => {
   let sum = 0
   for (let i = 0; i < bytes.length; i++) sum += bytes[i]!
@@ -75,9 +80,15 @@ export class S1 {
     this.polling = window.setInterval(() => void this.position().catch(() => {}), 1000)
   }
 
-  /** asks the browser for the S1's port */
-  static async connect() {
-    const port = await navigator.serial.requestPort({ filters: [usbFilter] })
+  /** the S1's port if this site was allowed to use it before, opens without a click */
+  static async knownPort() {
+    const ports = await navigator.serial.getPorts()
+    return ports.find(isS1)
+  }
+
+  /** opens the given port, or asks the browser for the S1's port */
+  static async connect(port?: SerialPort) {
+    port ??= await navigator.serial.requestPort({ filters: [usbFilter] })
     // CDC serial ignores the baud rate, Web Serial still needs one
     await port.open({ baudRate: 115200 })
     let s1: S1 | undefined

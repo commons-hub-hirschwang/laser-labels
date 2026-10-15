@@ -4,7 +4,7 @@ import { generateFrameJob, generateJob } from './gcode'
 import type { Label } from './label'
 import { bed, deviceStates, focusZ, material, plywoodSettings, type LaserSettings } from './machine'
 import type { Point } from './pathGeometry'
-import { S1, serialSupported } from './s1'
+import { isS1, S1, serialSupported } from './s1'
 
 // Web Serial only exists on https or localhost
 const serialMissing = !serialSupported && (window.isSecureContext
@@ -271,58 +271,120 @@ const state = ref<number>()
 const head = ref<Point>()
 const crossOffset = ref<Point>({ x: 0, y: 0 })
 const progress = ref<number>()
-const error = ref('')
-/** job uploaded, the S1 waits for its button */
-const waitingForButton = ref(false)
+/** each step shows its own errors and status */
+type Step = 'connection' | 'framing' | 'label'
+const error = ref<{ step: Step; text: string }>()
+const fail = (step: Step, text: string) => (error.value = { step, text })
+/** job uploaded, the S1 waits for its button; also a job uploaded before a page reload */
+const waitingForButton = computed(() => state.value === 13)
+// kept across page reloads, so a job still waiting on the S1 shows next to its step
+const storedJob = load<{ active?: 'label' | 'framing'; sent?: CutLabel }>('laser-job', {})
+/** the last job sent; machine states show next to its step */
+const activeJob = ref(storedJob.active)
 /** the label just sent, added to the history once the S1 starts it */
-let sent: CutLabel | undefined
-const activeJob = ref<'label' | 'framing'>()
+const sent = ref(storedJob.sent)
+watch([activeJob, sent], () => save('laser-job', { active: activeJob.value, sent: sent.value }))
 
-const stateText = computed(() => {
+/** the step whose button was used last; machine problems show next to it */
+const lastStep = ref<Step>('connection')
+
+// states of a running job show next to the step that sent it
+const jobStates = [10, 13, 14, 19]
+const machineProblem = computed(() => state.value !== undefined && state.value !== 3 &&
+  !jobStates.includes(state.value) ? deviceStates[state.value] : undefined)
+const jobText = computed(() => {
   if (progress.value !== undefined) return `Uploading… ${Math.round(progress.value * 100)} %`
-  if (state.value === undefined) return 'Connected'
-  if (state.value === 14 && activeJob.value === 'framing') return 'Framing…'
-  return deviceStates[state.value] ?? `State ${state.value}`
+  if (state.value === 10) return deviceStates[10]
+  if (state.value === 14) return activeJob.value === 'framing' ? 'Tracing the outline…' : deviceStates[14]
+  if (state.value === 19) return activeJob.value === 'framing' ? 'Outline traced.' : 'Done. Take the label out.'
+  return undefined
 })
 
-async function connect() {
+/** errors of the step's own actions, and machine problems next to the step used last */
+function warnings(step: Step) {
+  const list = error.value?.step === step ? [error.value.text] : []
+  if (step !== lastStep.value) return list
+  if (machineProblem.value) list.push(machineProblem.value)
+  // e.g. sent by xTool Studio, or before this page remembered its jobs
+  if (waitingForButton.value && !activeJob.value) {
+    list.push('A job is waiting on the S1. Press its front button to run it, or hold the button to clear it.')
+  }
+  return list
+}
+
+/** the step's hint shows only while it has nothing else to say */
+const hasMessages = (step: Step) =>
+  (activeJob.value === step && (!!jobText.value || waitingForButton.value)) || warnings(step).length > 0
+
+/** off after "Disconnect", also across page loads, until the next click on "Connect" */
+const autoConnect = ref(load('laser-connection', { auto: true }).auto)
+watch(autoConnect, () => save('laser-connection', { auto: autoConnect.value }))
+
+/** without a port, the browser asks the user to pick one */
+async function connect(port?: SerialPort) {
   if (connecting.value || s1.value) return
   connecting.value = true
-  error.value = ''
+  error.value = undefined
   try {
-    const machine = await S1.connect()
+    const machine = await S1.connect(port)
     machine.onState = (value) => {
       state.value = value
-      if (value === 3 || value === 19) activeJob.value = undefined
       if (value === 14) {
-        waitingForButton.value = false
-        if (sent) {
-          history.value.push(sent)
+        if (sent.value) {
+          history.value.push(sent.value)
           Object.assign(position, nextLabelPosition(position))
         }
-        sent = undefined
+        sent.value = undefined
       }
     }
     machine.onPosition = (value) => (head.value = value)
     machine.onError = () => {
-      error.value = 'USB connection lost. Reconnect the S1, then connect again.'
+      fail('connection', 'USB connection lost. Plug the S1 back in to reconnect.')
     }
     machine.onClose = () => {
       s1.value = undefined
       state.value = undefined
-      waitingForButton.value = false
-      activeJob.value = undefined
     }
     s1.value = machine
     crossOffset.value = await machine.crossOffset()
     state.value = await machine.state()
   } catch (reason) {
-    if ((reason as Error).name !== 'NotFoundError') error.value = (reason as Error).message // NotFoundError: dialog closed
+    // NotFoundError: dialog closed; automatic attempts fail quietly, e.g. when another tab holds the port
+    if (!port && (reason as Error).name !== 'NotFoundError') fail('connection', (reason as Error).message)
   } finally {
     connecting.value = false
   }
 }
-onBeforeUnmount(() => void s1.value?.close())
+
+function connectByClick() {
+  lastStep.value = 'connection'
+  autoConnect.value = true
+  void connect()
+}
+
+function disconnect() {
+  lastStep.value = 'connection'
+  autoConnect.value = false
+  void s1.value?.close()
+}
+
+// reconnect without a click to a port allowed before: on page load and when the S1 is plugged in
+async function reconnect() {
+  if (!autoConnect.value || !serialSupported) return
+  const port = await S1.knownPort()
+  if (port) await connect(port)
+}
+function plugged(event: Event) {
+  if (isS1(event.target as SerialPort)) void reconnect()
+}
+if (serialSupported) {
+  void reconnect()
+  navigator.serial.addEventListener('connect', plugged)
+}
+onBeforeUnmount(() => {
+  if (serialSupported) navigator.serial.removeEventListener('connect', plugged)
+  void s1.value?.close()
+})
 
 const corners = computed(() => {
   const { width, height } = props.label
@@ -336,10 +398,11 @@ const corners = computed(() => {
 
 /** moves the head so its red cross points at the corner */
 async function showCorner(corner: Point) {
-  error.value = ''
+  lastStep.value = 'framing'
+  error.value = undefined
   const target = { x: corner.x - crossOffset.value.x, y: corner.y - crossOffset.value.y }
   const reachable = { x: Math.min(Math.max(target.x, 0), bed.width), y: Math.min(Math.max(target.y, 0), bed.height) }
-  if (reachable.x !== target.x || reachable.y !== target.y) error.value = 'The cross cannot reach this corner, it stops at the edge.'
+  if (reachable.x !== target.x || reachable.y !== target.y) fail('framing', 'The cross cannot reach this corner, it stops at the edge.')
   await s1.value!.moveTo(reachable)
 }
 
@@ -347,21 +410,20 @@ const canFrame = computed(() => s1.value && positionFitsBed.value && state.value
 const canMoveCross = computed(() => s1.value && positionFitsBed.value && state.value === 3 && progress.value === undefined)
 
 async function frameLabel() {
-  error.value = ''
+  lastStep.value = 'framing'
   activeJob.value = 'framing'
+  sent.value = undefined
   try {
     const headPosition = head.value ?? await s1.value!.position()
-    const uploaded = await uploadJob(generateFrameJob({
+    await uploadJob(generateFrameJob({
       position,
       width: props.label.width,
       height: props.label.height,
       crossOffset: crossOffset.value,
       head: headPosition,
     }))
-    if (!uploaded) activeJob.value = undefined
   } catch (reason) {
-    activeJob.value = undefined
-    error.value = (reason as Error).message
+    fail('framing', (reason as Error).message)
   }
 }
 
@@ -381,23 +443,24 @@ const canSend = computed(() => s1.value && positionFitsBed.value &&
   state.value === 3 && progress.value === undefined)
 
 async function send() {
-  error.value = ''
   const { width, height, cutPath } = props.label
+  lastStep.value = 'label'
   activeJob.value = 'label'
+  sent.value = undefined
   if (await uploadJob(job())) {
-    sent = { text: props.text.trim().split('\n')[0]!, cutPath, x: position.x, y: position.y, width, height, date: new Date().toISOString() }
-  } else activeJob.value = undefined
+    sent.value = { text: props.text.trim().split('\n')[0]!, cutPath, x: position.x, y: position.y, width, height, date: new Date().toISOString() }
+  }
 }
 
+/** uploads for the active job; its errors show next to its step */
 async function uploadJob(gcode: string) {
-  error.value = ''
+  error.value = undefined
   progress.value = 0
   try {
     await s1.value!.sendJob(gcode, (fraction) => (progress.value = fraction))
-    waitingForButton.value = true
     return true
   } catch (reason) {
-    error.value = (reason as Error).message
+    fail(activeJob.value!, (reason as Error).message)
     return false
   } finally {
     progress.value = undefined
@@ -448,6 +511,9 @@ function download(filename: string, gcode: string) {
         <button type="button" class="secondary" @click="resetSettings">Reset to {{ material }} settings</button>
       </div>
     </details>
+    <p v-if="settingsChanged" class="warning">
+      Defaults have been overwritten. These settings may not be tuned for {{ material }}.
+    </p>
 
     <fieldset>
       <legend>Drag the label to position it on the bed</legend>
@@ -530,16 +596,20 @@ function download(filename: string, gcode: string) {
     <p v-if="serialMissing" class="warning">{{ serialMissing }} You can still download the SVG or the G-code.</p>
     <template v-else>
       <section class="machine-controls" aria-label="Laser cutter controls">
-        <div class="machine-control-row connection-row">
-          <button v-if="!s1" type="button" class="connect-button" :disabled="connecting" @click="connect">
+        <div class="machine-control-row">
+          <span class="step">1.</span>
+          <button v-if="!s1" type="button" class="connect-button" :disabled="connecting" @click="connectByClick">
             {{ connecting ? 'Connecting…' : 'Connect to xTool S1' }}<br />laser cutter (USB)
           </button>
-          <button v-else type="button" class="secondary" @click="s1.close()">Disconnect</button>
-          <p v-if="error" class="connection-error" aria-live="polite">{{ error }}</p>
-          <span v-else class="status">{{ s1 ? stateText : 'Not connected' }}</span>
+          <button v-else type="button" class="secondary" @click="disconnect">Disconnect</button>
+          <div class="step-status" aria-live="polite">
+            <p class="status">{{ s1 ? 'Connected' : 'Not connected' }}</p>
+            <p v-for="warning in warnings('connection')" :key="warning" class="warning">{{ warning }}</p>
+          </div>
         </div>
 
-        <div class="machine-control-row framing-row">
+        <div class="machine-control-row">
+          <span class="step">2.</span>
           <div class="actions corner-actions">
             <button
               v-for="corner in corners"
@@ -550,18 +620,31 @@ function download(filename: string, gcode: string) {
               :title="`Red cross to the ${corner.name} corner`"
               @click="showCorner(corner)"
             >{{ corner.symbol }}</button>
-            <button type="button" class="secondary frame-button" :disabled="!canFrame" @click="frameLabel">Frame label</button>
+            <button type="button" class="secondary frame-button" :disabled="!canFrame" @click="frameLabel">Trace outline</button>
           </div>
-          <span class="control-label">Framing</span>
+          <div class="step-status" aria-live="polite">
+            <p v-if="!hasMessages('framing')" class="hint">
+              Check that the label lies fully on the wood: move the red cross to its corners or trace its outline.
+              Nothing gets cut or engraved yet.
+            </p>
+            <template v-if="activeJob === 'framing'">
+              <p v-if="jobText" class="status">{{ jobText }}</p>
+              <p v-if="waitingForButton" class="warning">Outline sent. <strong>Press the front button on the S1 to trace it.</strong> The laser stays off.</p>
+            </template>
+            <p v-for="warning in warnings('framing')" :key="warning" class="warning">{{ warning }}</p>
+          </div>
         </div>
 
-        <div class="machine-control-row send-row">
-          <button type="button" :disabled="!canSend" @click="send">Send job to laser cutter</button>
-          <div class="send-status" aria-live="polite">
-            <p v-if="settingsChanged" class="warning settings-warning">
-              Defaults have been overwritten. These settings may not be tuned for {{ material }}.
-            </p>
-            <p v-if="waitingForButton" class="warning">Job sent. <strong>Press the front button on the S1 to start it.</strong></p>
+        <div class="machine-control-row">
+          <span class="step">3.</span>
+          <button type="button" :disabled="!canSend" @click="send">Engrave &amp; cut</button>
+          <div class="step-status" aria-live="polite">
+            <p v-if="!hasMessages('label')" class="hint">Engraves and cuts the label at this position.</p>
+            <template v-if="activeJob === 'label'">
+              <p v-if="jobText" class="status">{{ jobText }}</p>
+              <p v-if="waitingForButton" class="warning">Label sent. <strong>Press the front button on the S1 to start it.</strong></p>
+            </template>
+            <p v-for="warning in warnings('label')" :key="warning" class="warning">{{ warning }}</p>
           </div>
         </div>
       </section>

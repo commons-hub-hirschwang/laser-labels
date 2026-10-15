@@ -53,11 +53,29 @@ watch(options, () => {
 /** everything back to the defaults, except the text */
 function resetOptions() {
   Object.assign(options, { ...defaults, text: options.text })
+  customTextSize.value = false
 }
 
 function reshufflePattern() {
   options.patternSeed = Math.floor(Math.random() * 2 ** 31)
 }
+
+// letter heights in mm; "custom" shows the slider
+const textSizes = [
+  { value: 6, label: 'Small' },
+  { value: 10, label: 'Medium' },
+  { value: 19, label: 'Large' },
+] as const
+// presets use the default padding; padding can only be changed in "custom"
+const customTextSize = ref(options.padding !== defaults.padding ||
+  !textSizes.some((size) => size.value === options.textSize))
+const textSizeChoice = computed({
+  get: () => (customTextSize.value ? 'custom' : options.textSize),
+  set: (choice: number | 'custom') => {
+    customTextSize.value = choice === 'custom'
+    if (choice !== 'custom') Object.assign(options, { textSize: choice, padding: defaults.padding })
+  },
+})
 
 // logarithmic slider: equal slider steps change the letter height by equal ratios
 const minTextSize = 3
@@ -158,17 +176,6 @@ function download() {
   link.click()
   URL.revokeObjectURL(link.href)
 }
-
-const canShare = typeof navigator.canShare === 'function' &&
-  navigator.canShare({ files: [new File([''], 'test.svg', { type: 'image/svg+xml' })] })
-
-async function share() {
-  try {
-    await navigator.share({ files: [svgFile()] })
-  } catch (error) {
-    if ((error as Error).name !== 'AbortError') throw error
-  }
-}
 </script>
 
 <template>
@@ -211,13 +218,33 @@ async function share() {
         <textarea v-model="options.text" rows="3" />
       </label>
 
-      <label v-if="!qrOnly">
-        Text height: {{ options.textSize }} mm
-        <input v-model.number="textSizeSlider" type="range" min="0" max="1" step="0.001" />
-      </label>
+      <fieldset v-if="!qrOnly">
+        <legend>Size</legend>
+        <div class="choices">
+          <label v-for="size in textSizes" :key="size.value" class="choice">
+            <input v-model="textSizeChoice" type="radio" :value="size.value" />
+            {{ size.label }}
+          </label>
+          <label class="choice">
+            <input v-model="textSizeChoice" type="radio" value="custom" />
+            Custom
+          </label>
+        </div>
+        <div v-if="customTextSize" class="subsetting">
+          <label>
+            Text height: {{ options.textSize }} mm
+            <input v-model.number="textSizeSlider" type="range" min="0" max="1" step="0.001" />
+          </label>
+          <label>
+            Padding: {{ options.padding.toFixed(1) }} × letter height
+            <input v-model.number="options.padding" type="range" min="0.2" max="3" step="0.1" />
+          </label>
+        </div>
+      </fieldset>
 
-      <label>
-        Padding: {{ options.padding.toFixed(1) }} × {{ qrOnly ? '⅕ QR size' : 'letter height' }}
+      <!-- without text, the QR size sets the size -->
+      <label v-else>
+        Padding: {{ options.padding.toFixed(1) }} × ⅕ QR size
         <input v-model.number="options.padding" type="range" min="0.2" max="3" step="0.1" />
       </label>
 
@@ -284,7 +311,7 @@ async function share() {
           </label>
         </div>
 
-        <fieldset v-if="options.holes === 'top'" class="hole-subsetting">
+        <fieldset v-if="options.holes === 'top'" class="subsetting">
           <legend>Hole position</legend>
           <div class="choices">
             <label v-for="side in holeSides" :key="side.value" class="choice">
@@ -294,7 +321,7 @@ async function share() {
           </div>
         </fieldset>
 
-        <fieldset v-if="options.holes === 'sides'" class="hole-subsetting">
+        <fieldset v-if="options.holes === 'sides'" class="subsetting">
           <legend>Hole position</legend>
           <div class="choices">
             <label class="choice"><input v-model="options.holeAlign" type="radio" value="top" /> Top</label>
@@ -302,15 +329,11 @@ async function share() {
           </div>
         </fieldset>
 
-        <label v-if="options.holes !== 'none'" class="hole-subsetting">
+        <label v-if="options.holes !== 'none'" class="subsetting">
           Hole diameter: {{ options.holeDiameter }} mm
           <input v-model.number="options.holeDiameter" type="range" min="2" max="10" step="0.5" />
         </label>
       </fieldset>
-
-      <div class="actions">
-        <button v-if="canShare" type="button" :disabled="!label" @click="share">Share…</button>
-      </div>
     </form>
 
     <LaserPanel
